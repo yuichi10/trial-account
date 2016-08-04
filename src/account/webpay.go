@@ -186,7 +186,7 @@ func webpayProvisionalSale(w http.ResponseWriter, r *http.Request) {
 	rawjson, err := webpayConnect(rawurl, data, r, CONNECT_POST)
 	fmt.Fprintf(w, "%v %v amount: %v", rawjson, err, amount)
 }
-func webpayCreateProvisionalSale(customerToken string, amount string, r *http.Request) string {
+func webpayCreateProvisionalSale(customerToken string, amount string, r *http.Request) (string, error) {
 	rawurl := "https://api.webpay.jp/v1/charges"
 	data := url.Values{
 		"amount":      {amount},
@@ -196,8 +196,7 @@ func webpayCreateProvisionalSale(customerToken string, amount string, r *http.Re
 		"expire_days": {"45"},
 	}
 	rawjson, err := webpayConnect(rawurl, data, r, CONNECT_POST)
-	_ = err
-	return rawjson
+	return rawjson, err
 }
 
 /*

@@ -20,6 +20,18 @@ import (
 //orderのお金が仮売上→実売上のステータスを持っておくべき
 //depositもお金をとったかどうかのステータスを持っておくべき
 
+//キャンセル0 キャンセルなし
+//キャンセル1　通常キャンセル
+//キャンセル2 遅延によるキャンセル
+
+//ステータス
+//オーダーの同意がキャンセルもしくは仮売上が取得できなかった時-1
+//オーダーが存在している0
+//仮売上をとった1
+//実売上をとった2
+//デポジットをを考えている 3
+//すべての工程が終了
+
 const (
 	//トークン
 	TOKEN = "token"
@@ -108,7 +120,7 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
 	//借りる側のユーザーID
-	//userID := r.Form.Get(USER_ID)
+	userID := r.Form.Get(USER_ID)
 	//借りるアイテム
 	itemID := r.Form.Get(ITEM_ID)
 	//レンタル期間
@@ -125,6 +137,7 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	if rTo == "" {
 		//最後の日が指定してなかった場合
 		rentalTo = rentalFrom
+		rTo = rFrom
 	} else {
 		y, m, d = divideTime(rTo)
 		rentalTo = time.Date(y, time.Month(m), d, nowTime.Hour(), nowTime.Minute(), nowTime.Second(), 0, time.UTC)
@@ -163,9 +176,33 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "一日の料金は%v 合計料金は%v　です。\n", dayPrice, amount)
 	//新しいオーダーの作成
-	//dbSql = "INSERT orders SET rental_from=?, rental_to=?, item_id=?, user_id=?, day_price=?, amount=?"
-	//stmt, _ := db.Prepare(dbSql)
-	//_, err := stmt.Exec(rFrom, rTo, itemID, userID)
+	dbSql = "INSERT orders SET transport_allocate=?, rental_from=?, rental_to=?, item_id=?, user_id=?, day_price=?, amount=?"
+	stmt, _ := db.Prepare(dbSql)
+	insRes, err := stmt.Exec(0, rFrom, rTo, itemID, userID, dayPrice, amount)
+	if err != nil {
+		fmt.Fprintf(w, "オーダーのエラー: %v \n", err)
+		return
+	}
+	orderLastID, _ := insRes.LastInsertId()
+	fmt.Fprintf(w, "オーダを作りました\n プロダクトIDは%v\n オーダーのIDは%v\n", itemID, orderLastID)
+	//仮売上を取得
+	userID_int, _ := strconv.Atoi(userID)
+	cID, _ := getCustomerID(userID_int)
+	if err != nil {
+		fmt.Fprintf(w, "customer id err: %v \n", err)
+		return
+	}
+	fmt.Fprintf(w, "customer ID: %v\n", cID)
+	wpcRawJson, _ := webpayCreateProvisionalSale(cID, strconv.Itoa(amount), r)
+	jsJson, _ := simplejson.NewJson([]byte(wpcRawJson))
+	//ウェブペイのIDを登録
+	dbSql = "UPDATE orders SET order_charge_id=? where order_id=?"
+	stmt, _ = db.Prepare(dbSql)
+	_, err = stmt.Exec(jsJson.Get(WP_ID).MustString(), orderLastID)
+	if err != nil {
+		fmt.Fprintf(w, "アップデート: %v \n", err)
+		return
+	}
 }
 
 /**
@@ -180,7 +217,8 @@ func ConsentOrder(w http.ResponseWriter, r *http.Request) {
 	//オーダーのID
 	//orderID := r.Form.Get(ORDER_ID)
 	//Orderのconsentをtrueに
-	//仮売上の取得
+
+	//同意されなかったら仮売上の削除
 }
 
 /**
@@ -240,6 +278,23 @@ func UploadDeposit(w http.ResponseWriter, r *http.Request) {
  * @return {[type]}   [description]
  */
 func consentDeposit(w http.ResponseWriter, r *http.Request) {
+}
+
+func getCustomerID(userID int) (string, error) {
+	db := dbase.OpenDB()
+	defer db.Close()
+	dbSql := fmt.Sprintf("SELECT credit_customer_id FROM users where user_id=%v", userID)
+	var customerID string
+	res, err := db.Query(dbSql)
+	if err != nil {
+		return "", err
+	}
+	for res.Next() {
+		if err := res.Scan(&customerID); err != nil {
+			return "", err
+		}
+	}
+	return customerID, nil
 }
 
 func canRentalDay(pre, post time.Time) bool {

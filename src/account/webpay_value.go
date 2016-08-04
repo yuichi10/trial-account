@@ -13,4 +13,7 @@ const (
 	WP_CUS_CARD_TYPE      = "type"        //カードタイプ
 	WP_CUS_CURD_CVC_CHECK = "cvc_check"   //cvcのチェック
 	WP_CUS_CURD_LAST4     = "last4"       //カードの最後の４桁
+
+	//チャージID
+	WP_ID = "id"
 )
