@@ -1,7 +1,7 @@
 package account
 
 import (
-	_ "database/sql"
+	"database/sql"
 	"dbase"
 	_ "encoding/json"
 	"fmt"
@@ -39,12 +39,10 @@ const (
 	USER_ID = "user_id"
 	//プロダクトID
 	ITEM_ID = "item_id"
-	//オーダーID
-	ORDER_ID = "order_id"
-	//レンタルの開始日
-	RENTAL_FROM = "rental_from"
-	//レンタル終了日
-	RENTAL_TO = "rental_to"
+
+	//ステータス
+	STATUS_FAILED             = "-1" //オーダーが同意されなかった時
+	STATUS_GET_PROVISION_SALE = "1"  //仮売上をとった
 )
 
 //利用日の次の日が44日目(仮売上期限の一日前)->利用日は仮売上期限の二日前
@@ -62,18 +60,9 @@ type itemData struct {
 }
 
 func TestDB(w http.ResponseWriter, r *http.Request) {
-	db := dbase.OpenDB()
-	defer db.Close()
-	dbSql := fmt.Sprintf("INSERT users SET %s=?, %s=?", dbase.USER_CUSTMER_ID, dbase.USER_NAME)
-	stmt, err := db.Prepare(dbSql)
-	if err != nil {
-		fmt.Fprintf(w, "sql: %v\nプリペアエラーに失敗しました ERROR: %v", dbSql, err)
-		return
-	}
-	_, err = stmt.Exec("cus_id", "cus_name")
-	if err != nil {
-		fmt.Fprintf(w, "sql: %v\nユーザー作成に失敗しました ERROR: %v", dbSql, err)
-	}
+	//db := openDbr()
+	//tx, _ := db.Begin()
+	//tx.Commit()
 }
 
 /**
@@ -187,7 +176,7 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "オーダを作りました\n プロダクトIDは%v\n オーダーのIDは%v\n", itemID, orderLastID)
 	//仮売上を取得
 	userID_int, _ := strconv.Atoi(userID)
-	cID, _ := getCustomerID(userID_int)
+	cID, _ := getCustomerID(userID_int, db)
 	if err != nil {
 		fmt.Fprintf(w, "customer id err: %v \n", err)
 		return
@@ -196,9 +185,9 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	wpcRawJson, _ := webpayCreateProvisionalSale(cID, strconv.Itoa(amount), r)
 	jsJson, _ := simplejson.NewJson([]byte(wpcRawJson))
 	//ウェブペイのIDを登録
-	dbSql = "UPDATE orders SET order_charge_id=? where order_id=?"
+	dbSql = "UPDATE orders SET order_charge_id=?, status=? where order_id=?"
 	stmt, _ = db.Prepare(dbSql)
-	_, err = stmt.Exec(jsJson.Get(WP_ID).MustString(), orderLastID)
+	_, err = stmt.Exec(jsJson.Get(WP_ID).MustString(), STATUS_GET_PROVISION_SALE, orderLastID)
 	if err != nil {
 		fmt.Fprintf(w, "アップデート: %v \n", err)
 		return
@@ -212,13 +201,30 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
  */
 func ConsentOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
+	db := dbase.OpenDB()
+	defer db.Close()
 	//アイテムのID
 	//itemID := r.Form.Get(ITEM_ID)
 	//オーダーのID
-	//orderID := r.Form.Get(ORDER_ID)
+	orderID := r.Form.Get(ORDER_ID)
 	//Orderのconsentをtrueに
+	dbSql := fmt.Sprintf("UPDATE %v SET %v=? where %v=?", ORDER, ORDER_CONSENT, ORDER_ID)
+	stmt, _ := db.Prepare(dbSql)
+	_, err := stmt.Exec(true, orderID)
+	if err != nil {
+		fmt.Fprintf(w, "UPDATE ERROR: %v\n", err)
+		return
+	}
+	fmt.Fprintf(w, "同意されました。\n")
+}
 
-	//同意されなかったら仮売上の削除
+/**
+ * オーダーが同意しなかった時
+ * @param {[type]} w http.ResponseWriter [description]
+ * @param {[type]} r *http.Request       [description]
+ */
+func DisagreeOrder(w http.ResponseWriter, r *http.Request) {
+
 }
 
 /**
@@ -280,9 +286,21 @@ func UploadDeposit(w http.ResponseWriter, r *http.Request) {
 func consentDeposit(w http.ResponseWriter, r *http.Request) {
 }
 
-func getCustomerID(userID int) (string, error) {
-	db := dbase.OpenDB()
-	defer db.Close()
+/**
+ * リクエストで送られたデータのチェック
+ * @return {[type]} [description]
+ */
+func checkRequestData() {
+	//
+}
+
+/**
+ * ユーザーIDからカスタマーIDを出す
+ * @param  {[type]} userID int           [description]
+ * @param  {[type]} db     *sql.DB)      (string,      error [description]
+ * @return {[type]}        [description]
+ */
+func getCustomerID(userID int, db *sql.DB) (string, error) {
 	dbSql := fmt.Sprintf("SELECT credit_customer_id FROM users where user_id=%v", userID)
 	var customerID string
 	res, err := db.Query(dbSql)
@@ -297,6 +315,9 @@ func getCustomerID(userID int) (string, error) {
 	return customerID, nil
 }
 
+/**
+ * かせるかどうかの判定
+ */
 func canRentalDay(pre, post time.Time) bool {
 	nowTime := time.Now()
 	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
