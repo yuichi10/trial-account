@@ -47,22 +47,44 @@ const (
 
 //利用日の次の日が44日目(仮売上期限の一日前)->利用日は仮売上期限の二日前
 const DAY_LIMIT int = 43
-
-//アイテムデータ
-type itemData struct {
-	item_id       int
-	user_id       int
-	product_name  string
-	oneday_price  int
-	longday_price int
-	deposit_price int
-	delay_price   int
-}
+const CANCEL_FREE_DAY_LIMIT int = 4
 
 func TestDB(w http.ResponseWriter, r *http.Request) {
-	//db := openDbr()
-	//tx, _ := db.Begin()
-	//tx.Commit()
+	db, err := dbase.OpenDbr()
+	if err != nil {
+		fmt.Fprintf(w, "オープンERR: %v \n", err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		fmt.Fprintf(w, "トランザクションエラー: %v \n", err)
+		return
+	}
+	_, err = db.InsertInto("items").
+		Columns("user_id", "product_name", "oneday_price", "longday_price", "deposit_price", "delay_price").
+		Values(3, "Canon E 10", 4800, 4200, 12000, 7000).
+		Exec()
+	if err != nil {
+		tx.Rollback()
+		return
+	} else {
+
+		err := tx.Rollback()
+		fmt.Fprintf(w, "できたけどロールバック: %v \n", err)
+		return
+	}
+	var ot []orderType
+
+	db.Select("*").From("items").Load(&ot)
+	fmt.Fprintf(w, "製品一覧 %v", ot[0])
+	tx.Commit()
+	//db := dbase.OpenDB()
+	//defer db.Close()
+	//tx, err := db.Begin()
+	//if err != nil {
+	//	fmt.Fprintf(w, "トランザクションエラー")
+	//	return
+	//}
+	//dbSql := "INSERT INTO items (user_id, product_name, oneday_price, longday_price, deposit_price, delay_price) VALUES(?, ?, ?, ?, ?, ?)"
 }
 
 /**
@@ -132,7 +154,7 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 		rentalTo = time.Date(y, time.Month(m), d, nowTime.Hour(), nowTime.Minute(), nowTime.Second(), 0, time.UTC)
 	}
 	//利用できる日かどうか
-	if !canRentalDay(rentalFrom, rentalTo) {
+	if !checkRentalDay(rentalFrom, rentalTo) {
 		fmt.Fprintf(w, "%vから%vはレンタルできません\n", rentalFrom, rentalTo)
 		return
 	}
@@ -224,7 +246,25 @@ func ConsentOrder(w http.ResponseWriter, r *http.Request) {
  * @param {[type]} r *http.Request       [description]
  */
 func DisagreeOrder(w http.ResponseWriter, r *http.Request) {
-
+	r.ParseForm()
+	db := dbase.OpenDB()
+	defer db.Close()
+	orderID := r.Form.Get(ORDER_ID)
+	dbSql := fmt.Sprintf("UPDATE %v SET %v=? where %v=?", ORDER, ORDER_STATUS, ORDER_ID)
+	stmt, _ := db.Prepare(dbSql)
+	_, err := stmt.Exec(STATUS_FAILED, orderID)
+	if err != nil {
+		fmt.Fprintf(w, "UPDATE ERROR: %v \n", err)
+		return
+	}
+	fmt.Fprintf(w, "同意がキャンセルされました\n")
+	chargeID, err := getChargeID(orderID, db)
+	if err != nil {
+		fmt.Fprintf(w, "charge ID ERR: %v\n", err)
+	}
+	//仮売上をキャンセル
+	rawjson, err := webpayCancelProvisionalSale(chargeID, r)
+	fmt.Fprintf(w, "rawjson: %v \n err: %v \n", rawjson, err)
 }
 
 /**
@@ -234,10 +274,13 @@ func DisagreeOrder(w http.ResponseWriter, r *http.Request) {
  */
 func CanselOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
+	db := dbase.OpenDB()
 	//ユーザーID
 	//userID := r.Form.Get(USER_ID)
 	//オーダーID
-	//orderID := r.Form.Get(ORDER_ID)
+	orderID := r.Form.Get(ORDER_ID)
+	res, err := canCancelFree(orderID, db)
+	fmt.Fprintf(w, "レンタル日: %v \n ERR: %v \n", res, err)
 	//キャンセルをtrueに
 	//もし届け日の４日以内の場合キャンセル料分だけを実売上に
 	//それより前のキャンセルの場合仮売上全部をキャンセル
@@ -294,31 +337,34 @@ func checkRequestData() {
 	//
 }
 
-/**
- * ユーザーIDからカスタマーIDを出す
- * @param  {[type]} userID int           [description]
- * @param  {[type]} db     *sql.DB)      (string,      error [description]
- * @return {[type]}        [description]
- */
-func getCustomerID(userID int, db *sql.DB) (string, error) {
-	dbSql := fmt.Sprintf("SELECT credit_customer_id FROM users where user_id=%v", userID)
-	var customerID string
-	res, err := db.Query(dbSql)
+func canCancelFree(orderID string, db *sql.DB) (string, error) {
+	dbSql := fmt.Sprintf("SELECT %v FROM %v WHERE %v=?", RENTAL_FROM, ORDER, ORDER_ID)
+	res, err := db.Query(dbSql, orderID)
 	if err != nil {
 		return "", err
 	}
+	var rentalStartDateStr string
 	for res.Next() {
-		if err := res.Scan(&customerID); err != nil {
+		if err := res.Scan(&rentalStartDateStr); err != nil {
 			return "", err
 		}
 	}
-	return customerID, nil
+	//rentalStartDate := time.Time(rentalStartDateStr)
+	return rentalStartDateStr, nil
 }
 
 /**
- * かせるかどうかの判定
+ * ステータスのチェック
+ * @return {[type]} [description]
  */
-func canRentalDay(pre, post time.Time) bool {
+func checkStatus() {
+
+}
+
+/**
+ * かせるかどうかの日にち判定
+ */
+func checkRentalDay(pre, post time.Time) bool {
 	nowTime := time.Now()
 	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
 	//契約できる日かどうか(今はとりあえず仮売上の日にちを超えないようになってるかどうか)

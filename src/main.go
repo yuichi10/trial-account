@@ -10,9 +10,12 @@ import (
 
 func main() {
 	http.HandleFunc("/", helloGo)
+	http.HandleFunc("/account/TestDB", account.TestDB)
 	http.HandleFunc("/account/PublishOrder", account.PublishOrder)
 	http.HandleFunc("/account/AddCustomer", account.AddCustomer)
 	http.HandleFunc("/account/ConsentOrder", account.ConsentOrder)
+	http.HandleFunc("/account/DisagreeOrder", account.DisagreeOrder)
+	http.HandleFunc("/account/CanselOrder", account.CanselOrder)
 	http.ListenAndServe(":9977", context.ClearHandler(http.DefaultServeMux))
 }
 

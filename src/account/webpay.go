@@ -208,7 +208,13 @@ func webpayProvisionalSaleCancel(w http.ResponseWriter, r *http.Request) {
 	rawurl := "https://api.webpay.jp/v1/charges/" + token + "/refund"
 	data := url.Values{}
 	rawjson, err := webpayConnect(rawurl, data, r, CONNECT_POST)
-	fmt.Fprintf(w, "%v %v", rawjson, err)
+	fmt.Fprintf(w, "rawurl: %v \n error: %v \n", rawjson, err)
+}
+func webpayCancelProvisionalSale(ch_token string, r *http.Request) (string, error) {
+	rawurl := "https://api.webpay.jp/v1/charges/" + ch_token + "/refund"
+	data := url.Values{}
+	rawjson, err := webpayConnect(rawurl, data, r, CONNECT_POST)
+	return rawjson, err
 }
 
 /*
