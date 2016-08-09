@@ -231,12 +231,11 @@ func webpayProvisionalSaleToReal(w http.ResponseWriter, r *http.Request) {
 	rawjson, err := webpayConnect(rawurl, data, r, CONNECT_POST)
 	fmt.Fprintf(w, "%v %v", rawjson, err)
 }
-func webpayProvisionalToReal(chargeId string, amount string, r *http.Request) string {
+func webpayProvisionalToReal(chargeId string, amount string, r *http.Request) (string, error) {
 	rawurl := "https://api.webpay.jp/v1/charges/" + chargeId + "/capture"
 	data := url.Values{
 		"amount": {amount},
 	}
 	rawjson, err := webpayConnect(rawurl, data, r, CONNECT_POST)
-	_ = err
-	return rawjson
+	return rawjson, err
 }

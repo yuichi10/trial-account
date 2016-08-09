@@ -13,10 +13,20 @@ const (
 	//レンタルの開始日
 	RENTAL_FROM = "rental_from"
 	//レンタル終了日
-	RENTAL_TO       = "rental_to"
-	ORDER_CHARGE_ID = "order_charge_id"
-	ORDER_CONSENT   = "order_consent"
-	ORDER_STATUS    = "status"
+	RENTAL_TO          = "rental_to"
+	ORDER_CHARGE_ID    = "order_charge_id"
+	ORDER_CONSENT      = "order_consent"
+	ORDER_STATUS       = "status"
+	ORDER_CANCEL_DATE  = "cancel_date"
+	ORDER_CANCEL_STATE = "cancel_status"
+	ORDER_AMOUNT       = "amount"
+)
+
+const (
+	//オーダーのキャンセルのステータス
+	ORDER_STATE_CANCEL_NONE = "0" //キャンセル無し
+	ORDER_STATE_CANCEL_FREE = "1" //無料のキャンセル
+	ORDER_STATE_CANCEL_PAID = "2" //有料のキャンセル
 )
 
 type orderType struct {
@@ -31,7 +41,8 @@ type orderType struct {
 	Day_price          int         `db:day_price`
 	Amount             int         `db:amount`
 	Deposit_id         int         `db:deposit_id`
-	Is_cancel          int         `db:is_cancel`
+	Cancel_date        interface{} `db:cancel_date`
+	Cancel_status      int         `db:cancel_status`
 	Status             int         `db:status`
 }
 
@@ -54,4 +65,19 @@ func getChargeID(orderID string, db *sql.DB) (string, error) {
 		}
 	}
 	return chargeID, nil
+}
+
+func getAmount(orderID string, db *sql.DB) (int, error) {
+	dbSql := fmt.Sprintf("SELECT %v FROM %v where %v=%v", ORDER_AMOUNT, ORDER, ORDER_ID, orderID)
+	var amount int
+	res, err := db.Query(dbSql)
+	if err != nil {
+		return 0, err
+	}
+	for res.Next() {
+		if err := res.Scan(&amount); err != nil {
+			return 0, err
+		}
+	}
+	return amount, nil
 }

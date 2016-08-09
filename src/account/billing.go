@@ -43,11 +43,18 @@ const (
 	//ステータス
 	STATUS_FAILED             = "-1" //オーダーが同意されなかった時
 	STATUS_GET_PROVISION_SALE = "1"  //仮売上をとった
+	STATUS_GET_REAL_SALE      = "2"  //実売上をとった
+	STATUS_FINISH             = "99" //すべての工程を終了
 )
 
 //利用日の次の日が44日目(仮売上期限の一日前)->利用日は仮売上期限の二日前
 const DAY_LIMIT int = 43
+
+//キャンセルの日
 const CANCEL_FREE_DAY_LIMIT int = 4
+
+//キャンセル料の割合
+const CANCEL_RATE float64 = 0.2
 
 func TestDB(w http.ResponseWriter, r *http.Request) {
 	db, err := dbase.OpenDbr()
@@ -275,13 +282,68 @@ func DisagreeOrder(w http.ResponseWriter, r *http.Request) {
 func CanselOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
-	//ユーザーID
-	//userID := r.Form.Get(USER_ID)
-	//オーダーID
+	var dbSql string
 	orderID := r.Form.Get(ORDER_ID)
 	res, err := canCancelFree(orderID, db)
+	if err != nil {
+		fmt.Fprintf(w, "借りれるかエラー%v \n", err)
+		return
+	}
 	fmt.Fprintf(w, "レンタル日: %v \n ERR: %v \n", res, err)
 	//キャンセルをtrueに
+	if res {
+		t := time.Now()
+		dbSql = fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
+		stmt, err := db.Prepare(dbSql)
+		if err != nil {
+			fmt.Fprintf(w, "str: %v \nstmt ERR: %v \n", dbSql, err)
+			return
+		}
+		_, err = stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_FREE, orderID)
+		if err != nil {
+			fmt.Fprintf(w, "実行のエラー: %v \n ", err)
+			return
+		}
+		chID, err := getChargeID(orderID, db)
+		if err != nil {
+			fmt.Fprintf(w, "chargeID: %v \n ", err)
+			return
+		}
+		res, err := webpayCancelProvisionalSale(chID, r)
+		dbSql = fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_STATUS, ORDER_ID)
+		stmt, _ = db.Prepare(dbSql)
+		_, err = stmt.Exec(STATUS_FINISH, orderID)
+		if err != nil {
+			fmt.Fprintf(w, "最終ステータスの変更: %v \n ", err)
+			return
+		}
+		fmt.Fprintf(w, "仮売上の無効化: %v \n もしくはエラー: %v \n", res, err)
+	} else {
+		t := time.Now()
+		dbSql = fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
+		stmt, _ := db.Prepare(dbSql)
+		_, err := stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_PAID, orderID)
+		if err != nil {
+			fmt.Fprintf(w, "実行のエラー: %v \n ", err)
+			return
+		}
+		chID, err := getChargeID(orderID, db)
+		amount, err := getAmount(orderID, db)
+		var amountFloat float64 = CANCEL_RATE * float64(amount)
+		amount = int(amountFloat)
+		res, err := webpayProvisionalToReal(chID, strconv.Itoa(amount), r)
+		if err != nil {
+			return
+		}
+		dbSql = fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_STATUS, ORDER_ID)
+		stmt, _ = db.Prepare(dbSql)
+		_, err = stmt.Exec(STATUS_FINISH, orderID)
+		if err != nil {
+			fmt.Fprintf(w, "最終ステータスの変更: %v \n ", err)
+			return
+		}
+		fmt.Fprintf(w, "キャンセル料: %v 円 : %v　円 \n 一部の実売上か: %v \n もしくはエラー: %v \n", amount, amountFloat, res, err)
+	}
 	//もし届け日の４日以内の場合キャンセル料分だけを実売上に
 	//それより前のキャンセルの場合仮売上全部をキャンセル
 }
@@ -337,20 +399,28 @@ func checkRequestData() {
 	//
 }
 
-func canCancelFree(orderID string, db *sql.DB) (string, error) {
+func canCancelFree(orderID string, db *sql.DB) (bool, error) {
 	dbSql := fmt.Sprintf("SELECT %v FROM %v WHERE %v=?", RENTAL_FROM, ORDER, ORDER_ID)
 	res, err := db.Query(dbSql, orderID)
 	if err != nil {
-		return "", err
+		return false, err
 	}
-	var rentalStartDateStr string
+	var rentalStartDateInter interface{}
 	for res.Next() {
-		if err := res.Scan(&rentalStartDateStr); err != nil {
-			return "", err
+		if err := res.Scan(&rentalStartDateInter); err != nil {
+			return false, err
 		}
 	}
+	if rentalStartDateInter == nil {
+		return false, nil
+	}
 	//rentalStartDate := time.Time(rentalStartDateStr)
-	return rentalStartDateStr, nil
+	rentalStartDate := rentalStartDateInter.(time.Time)
+	subDays := calcSubDate(time.Now(), rentalStartDate)
+	if subDays <= CANCEL_FREE_DAY_LIMIT {
+		return false, nil
+	}
+	return true, nil
 }
 
 /**
