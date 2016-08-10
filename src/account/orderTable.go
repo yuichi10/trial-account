@@ -3,6 +3,7 @@ package account
 import (
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 const (
@@ -20,13 +21,15 @@ const (
 	ORDER_CANCEL_DATE  = "cancel_date"
 	ORDER_CANCEL_STATE = "cancel_status"
 	ORDER_AMOUNT       = "amount"
+	IS_CANCEL          = "is_cancel"
 )
 
 const (
 	//オーダーのキャンセルのステータス
-	ORDER_STATE_CANCEL_NONE = "0" //キャンセル無し
-	ORDER_STATE_CANCEL_FREE = "1" //無料のキャンセル
-	ORDER_STATE_CANCEL_PAID = "2" //有料のキャンセル
+	ORDER_STATE_CANCEL_NONE  = "0" //キャンセル無し
+	ORDER_STATE_CANCEL_FREE  = "1" //無料のキャンセル
+	ORDER_STATE_CANCEL_PAID  = "2" //有料のキャンセル
+	ORDER_STATE_CANCEL_DELAY = "3"
 )
 
 type orderType struct {
@@ -44,6 +47,30 @@ type orderType struct {
 	Cancel_date        interface{} `db:cancel_date`
 	Cancel_status      int         `db:cancel_status`
 	Status             int         `db:status`
+}
+
+func checkCanDelayCancelDay(orderID string, db *sql.DB) (bool, error) {
+	dbSql := fmt.Sprintf("SELECT %v FROM %v where %v=%v", RENTAL_FROM, ORDER, ORDER_ID, orderID)
+	var rentalFrom interface{}
+	res, err := db.Query(dbSql)
+	if err != nil {
+		return false, err
+	}
+	for res.Next() {
+		if err := res.Scan(&rentalFrom); err != nil {
+			return false, err
+		}
+	}
+
+	nowTime := time.Now()
+	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), nowTime.Minute(), nowTime.Second(), time.UTC)
+	fmt.Printf("day: %v\nnow: %v\n", rentalFrom, nowTime)
+	subTime := nowTime.Sub(rentalFrom.(time.Time))
+	fmt.Printf("sub: %v \n", subTime)
+	if subTime.Hours() >= 24 || subTime.Hours() < 0 {
+		return false, nil
+	}
+	return true, nil
 }
 
 /**

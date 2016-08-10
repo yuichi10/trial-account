@@ -41,10 +41,11 @@ const (
 	ITEM_ID = "item_id"
 
 	//ステータス
-	STATUS_FAILED             = "-1" //オーダーが同意されなかった時
-	STATUS_GET_PROVISION_SALE = "1"  //仮売上をとった
-	STATUS_GET_REAL_SALE      = "2"  //実売上をとった
-	STATUS_FINISH             = "99" //すべての工程を終了
+	STATUS_FAILED                 = "-1" //オーダーが同意されなかった時
+	STATUS_GET_PROVISION_SALE     = "1"  //仮売上をとった
+	STATUS_GET_REAL_SALE          = "2"  //実売上をとった
+	STATUS_DELAY_CANCEL_REAL_SALE = "3"  //遅延によるキャンセルで実売上をとった
+	STATUS_FINISH                 = "99" //すべての工程を終了
 )
 
 //利用日の次の日が44日目(仮売上期限の一日前)->利用日は仮売上期限の二日前
@@ -344,8 +345,6 @@ func CanselOrder(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(w, "キャンセル料: %v 円 : %v　円 \n 一部の実売上か: %v \n もしくはエラー: %v \n", amount, amountFloat, res, err)
 	}
-	//もし届け日の４日以内の場合キャンセル料分だけを実売上に
-	//それより前のキャンセルの場合仮売上全部をキャンセル
 }
 
 /**
@@ -354,7 +353,67 @@ func CanselOrder(w http.ResponseWriter, r *http.Request) {
  * @param {[type]} r *http.Request       [description]
  */
 func DelayCanselReport(w http.ResponseWriter, r *http.Request) {
-
+	r.ParseForm()
+	db := dbase.OpenDB()
+	orderID := r.Form.Get(ORDER_ID)
+	isCancelStr := r.Form.Get(IS_CANCEL)
+	isCancel, _ := strconv.Atoi(isCancelStr)
+	is, err := checkCanDelayCancelDay(orderID, db)
+	if !is || err != nil {
+		fmt.Fprintf(w, "できません.\nERR: %v\n", err)
+		return
+	}
+	fmt.Fprintf(w, "キャンセル: %v\n", isCancel)
+	if isCancel != 0 {
+		t := time.Now()
+		dbSql := fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
+		stmt, _ := db.Prepare(dbSql)
+		_, err := stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_DELAY, orderID)
+		if err != nil {
+			fmt.Fprintf(w, "実行のエラー: %v \n ", err)
+			return
+		}
+		chID, err := getChargeID(orderID, db)
+		if err != nil {
+			fmt.Fprintf(w, "chargeID: %v \n ", err)
+			return
+		}
+		res, err := webpayCancelProvisionalSale(chID, r)
+		dbSql = fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_STATUS, ORDER_ID)
+		stmt, _ = db.Prepare(dbSql)
+		_, err = stmt.Exec(STATUS_FINISH, orderID)
+		if err != nil {
+			fmt.Fprintf(w, "最終ステータスの変更: %v \n ", err)
+			return
+		}
+		fmt.Fprintf(w, "仮売上の無効化: %v \n もしくはエラー: %v \n", res, err)
+		return
+	} else {
+		t := time.Now()
+		dbSql := fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
+		stmt, _ := db.Prepare(dbSql)
+		_, err := stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_DELAY, orderID)
+		if err != nil {
+			fmt.Fprintf(w, "実行のエラー: %v \n ", err)
+			return
+		}
+		chID, err := getChargeID(orderID, db)
+		amount, err := getAmount(orderID, db)
+		if err != nil {
+			fmt.Fprintf(w, "chargeID: %v \n ", err)
+			return
+		}
+		res, err := webpayProvisionalToReal(chID, strconv.Itoa(amount), r)
+		dbSql = fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_STATUS, ORDER_ID)
+		stmt, _ = db.Prepare(dbSql)
+		_, err = stmt.Exec(STATUS_DELAY_CANCEL_REAL_SALE, orderID)
+		if err != nil {
+			fmt.Fprintf(w, "最終ステータスの変更: %v \n ", err)
+			return
+		}
+		fmt.Fprintf(w, "仮売上の実売上: %v \n もしくはエラー: %v \n", res, err)
+		return
+	}
 }
 
 /**
@@ -428,7 +487,6 @@ func canCancelFree(orderID string, db *sql.DB) (bool, error) {
  * @return {[type]} [description]
  */
 func checkStatus() {
-
 }
 
 /**
