@@ -3,6 +3,7 @@ package account
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -73,6 +74,21 @@ func checkCanDelayCancelDay(orderID string, db *sql.DB) (bool, error) {
 	return true, nil
 }
 
+func getItemID(orderID string, db *sql.DB) (string, error) {
+	dbSql := fmt.Sprintf("SELECT %v FROM %v where %v=%v", ITEM_ID, ORDER, ORDER_ID, orderID)
+	var itemID int
+	res, err := db.Query(dbSql)
+	if err != nil {
+		return "", err
+	}
+	for res.Next() {
+		if err := res.Scan(&itemID); err != nil {
+			return "", err
+		}
+	}
+	return strconv.Itoa(itemID), nil
+}
+
 /**
  * おーだーIDからchargeIDを取得
  * @param  {[type]} orderID int           [description]
@@ -94,6 +110,12 @@ func getChargeID(orderID string, db *sql.DB) (string, error) {
 	return chargeID, nil
 }
 
+/**
+ * orderIDから料金を取得
+ * @param  {[type]} orderID string        [description]
+ * @param  {[type]} db      *sql.DB)      (int,         error [description]
+ * @return {[type]}         [description]
+ */
 func getAmount(orderID string, db *sql.DB) (int, error) {
 	dbSql := fmt.Sprintf("SELECT %v FROM %v where %v=%v", ORDER_AMOUNT, ORDER, ORDER_ID, orderID)
 	var amount int

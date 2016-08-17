@@ -37,8 +37,6 @@ const (
 	TOKEN = "token"
 	//ユーザーID
 	USER_ID = "user_id"
-	//プロダクトID
-	ITEM_ID = "item_id"
 
 	//ステータス
 	STATUS_FAILED                 = "-1" //オーダーが同意されなかった時
@@ -176,7 +174,7 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for res.Next() {
-		if err := res.Scan(&iData.item_id, &iData.user_id, &iData.product_name, &iData.oneday_price, &iData.longday_price, &iData.deposit_price, &iData.delay_price); err != nil {
+		if err := res.Scan(&iData.Item_id, &iData.User_id, &iData.Product_name, &iData.Oneday_price, &iData.Longday_price, &iData.Deposit_price, &iData.Delay_price); err != nil {
 			fmt.Fprintf(w, "scan item err: %v", err)
 			return
 		}
@@ -187,10 +185,10 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	var dayPrice int
 	var amount int
 	if period := calcSubDate(rentalFrom, rentalTo); (period + 1) > 1 {
-		dayPrice = iData.longday_price
+		dayPrice = iData.Longday_price
 		amount = (period + 1) * dayPrice
 	} else {
-		dayPrice = iData.oneday_price
+		dayPrice = iData.Oneday_price
 		amount = dayPrice
 	}
 	fmt.Fprintf(w, "一日の料金は%v 合計料金は%v　です。\n", dayPrice, amount)
@@ -420,16 +418,43 @@ func DelayCanselReport(w http.ResponseWriter, r *http.Request) {
  * オーダーの仮売上を実売上に
  */
 func ProvisionOrderToReal() {
-
+	//
 }
 
 /**
- * デポジットの作成
+ * 保険料のデポジットの作成
  * @param {[type]} w http.ResponseWriter [description]
  * @param {[type]} r *http.Request       [description]
  */
-func StartNegtiateDeposit(w http.ResponseWriter, r *http.Request) {
+func StartNegotiateDeposit(w http.ResponseWriter, r *http.Request) {
 	//理由から遅延料金、保険料金を設定
+	//保険料のデポジットをとれる期間かどうかの判定,もうすでにないかどうかの判定
+	r.ParseForm()
+	db := dbase.OpenDB()
+	orderID := r.Form.Get(ORDER_ID)
+	iOrderId, _ := strconv.Atoi(orderID)
+	itemID, _ := getItemID(orderID, db)
+	item, _ := getItemData(itemID, db)
+	fmt.Fprintf(w, "Itme: %v \n", item)
+	deposit := new(depositType)
+	deposit.Order_id = iOrderId
+	deposit.Deposit_price = item.Deposit_price
+	deposit.Delay_price = item.Delay_price
+	deposit.Delay_day = 1
+	deposit.Status = DEPOSIT_STATE_UPDATE
+	deposit.Amount = (int)((float64)(deposit.Deposit_price) + (float64)(deposit.Delay_price)*deposit.Delay_day)
+	dbSql := fmt.Sprintf("INSERT %v SET %v=?, %v=?, %v=?, %v=?, %v=?, %v=?", DEPOSIT, ORDER_ID, DEPOSIT_DEPOSIT_PRICE, DEPOSIT_DELAY_PRICE, DEPOSIT_DELAY_DAY, DEPOSIT_AMOUNT, DEPOSIT_STATUS)
+	stmt, err := db.Prepare(dbSql)
+	if err != nil {
+		fmt.Fprintf(w, "プリペアエラー: %v", err)
+		return
+	}
+	_, err = stmt.Exec(iOrderId, deposit.Deposit_price, deposit.Delay_price, deposit.Delay_day, deposit.Amount, deposit.Status)
+	if err != nil {
+		fmt.Fprintf(w, "exec err: %v", err)
+		return
+	}
+	fmt.Fprintf(w, "新しいデポジットを作成しました")
 }
 
 /**
@@ -438,7 +463,31 @@ func StartNegtiateDeposit(w http.ResponseWriter, r *http.Request) {
  * @param {[type]} r *http.Request       [description]
  */
 func UploadDeposit(w http.ResponseWriter, r *http.Request) {
-
+	r.ParseForm()
+	db := dbase.OpenDB()
+	defer db.Close()
+	orderID := r.Form.Get(ORDER_ID)
+	deposit, err := getDepositInfo(orderID, db)
+	if depositPrice := r.Form.Get(DEPOSIT_DEPOSIT_PRICE); depositPrice != "" {
+		deposit.Deposit_price, _ = strconv.Atoi(depositPrice)
+	}
+	if depositDelayPrice := r.Form.Get(DEPOSIT_DELAY_PRICE); depositDelayPrice != "" {
+		deposit.Delay_price, _ = strconv.Atoi(depositDelayPrice)
+	}
+	if depositDelayDay := r.Form.Get(DEPOSIT_DELAY_DAY); depositDelayDay != "" {
+		deposit.Delay_day, _ = strconv.ParseFloat(depositDelayDay, 64)
+	}
+	deposit.Amount = calcDepositAmount(deposit)
+	dbSql := fmt.Sprintf("UPDATE %v SET %v=?, %v=?, %v=?, %v=? WHERE %v=?", DEPOSIT, DEPOSIT_DEPOSIT_PRICE, DEPOSIT_DELAY_PRICE, DEPOSIT_DELAY_DAY, AMOUNT, ORDER_ID)
+	stmt, _ := db.Prepare(dbSql)
+	_, err = stmt.Exec(deposit.Deposit_price, deposit.Delay_price, deposit.Delay_day, deposit.Amount, orderID)
+	if err != nil {
+		fmt.Fprintf(w, "アップデートエラー: %v \n", err)
+		return
+	}
+	deposit, err = getDepositInfo(orderID, db)
+	fmt.Fprintf(w, "デポジット: %v \n エラー: %v \n", deposit, err)
+	return
 }
 
 /**
