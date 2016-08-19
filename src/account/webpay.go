@@ -1,8 +1,9 @@
 package account
 
 import (
-	//"encoding/json"
+	_ "encoding/json"
 	"fmt"
+	"github.com/bitly/go-simplejson"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -238,4 +239,11 @@ func webpayProvisionalToReal(chargeId string, amount string, r *http.Request) (s
 	}
 	rawjson, err := webpayConnect(rawurl, data, r, CONNECT_POST)
 	return rawjson, err
+}
+
+func checkCardError(js *simplejson.Json) (bool, string) {
+	if val := js.Get(WP_ERROR).Interface(); val != nil {
+		return false, js.Get(WP_ERROR).Get("message").MustString()
+	}
+	return true, ""
 }

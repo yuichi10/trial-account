@@ -2,12 +2,20 @@ package account
 
 import (
 	"database/sql"
+	_ "encoding/json"
 	"fmt"
+	//"github.com/bitly/go-simplejson"
 )
 
 const (
-	DEPOSIT_STATE_UPDATE = 1
-	DEPOSIT_STATE_FINISH = 99
+	DEPOSIT_STATE_UPDATE                = 1 //アップデート中
+	DEPOSIT_STATE_RENT_AGREE            = 2
+	DEPOSIT_STATE_LEND_AGREE            = 3
+	DEPOSIT_STATE_BOTH_AGREE            = 4
+	DEPOSIT_STATE_GET_PROVISON_SALE     = 5
+	DEPOSIT_STATE_FAILED_PROVISION_SALE = 6
+	DEPOSIT_STATE_GET_REAL_SALE         = 7
+	DEPOSIT_STATE_FINISH                = 99
 )
 
 const (
@@ -46,6 +54,13 @@ func getDepositInfo(orderID string, db *sql.DB) (*depositType, error) {
 		}
 	}
 	return deposit, nil
+}
+
+func updateDepositState(orderID string, state int, db *sql.DB) error {
+	dbSql := fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", DEPOSIT, DEPOSIT_STATUS, ORDER_ID)
+	stmt, err := db.Prepare(dbSql)
+	_, err = stmt.Exec(state, orderID)
+	return err
 }
 
 func calcDepositAmount(deposit *depositType) int {

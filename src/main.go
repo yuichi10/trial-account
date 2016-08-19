@@ -18,7 +18,8 @@ func main() {
 	http.HandleFunc("/account/CanselOrder", account.CanselOrder)
 	http.HandleFunc("/account/DelayCanselReport", account.DelayCanselReport)
 	http.HandleFunc("/account/StartNegotiateDeposit", account.StartNegotiateDeposit)
-	http.HandleFunc("/account/UploadDeposit", account.UploadDeposit)
+	http.HandleFunc("/account/UpdateDeposit", account.UpdateDeposit)
+	http.HandleFunc("/account/ConsentDeposit", account.ConsentDeposit)
 	http.ListenAndServe(":9977", context.ClearHandler(http.DefaultServeMux))
 }
 

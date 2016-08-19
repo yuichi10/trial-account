@@ -36,7 +36,7 @@ const (
 type orderType struct {
 	Order_id           int         `db:order_id`
 	Order_charge_id    string      `db:order_charge_id`
-	order_consent      int         `db:order_consent`
+	Order_consent      int         `db:order_consent`
 	Transport_allocate int         `db:transport_allocate`
 	Rental_from        interface{} `db:rental_from`
 	Rental_to          interface{} `db:rental_to`
@@ -44,10 +44,38 @@ type orderType struct {
 	User_id            int         `db:user_id`
 	Day_price          int         `db:day_price`
 	Amount             int         `db:amount`
-	Deposit_id         int         `db:deposit_id`
 	Cancel_date        interface{} `db:cancel_date`
 	Cancel_status      int         `db:cancel_status`
 	Status             int         `db:status`
+}
+
+func getOrderInfo(orderID string, db *sql.DB) (*orderType, error) {
+	dbSql := fmt.Sprintf("SELECT * FROM %v WHERE %v=?", ORDER, ORDER_ID)
+	//stmt, err := db.Prepare(dbSql)
+	//res, err := stmt.Exec(orderID)
+	res, err := db.Query(dbSql, orderID)
+	order := new(orderType)
+	if err != nil {
+		return order, err
+	}
+	for res.Next() {
+		if err := res.Scan(&order.Order_id,
+			&order.Order_charge_id,
+			&order.Order_consent,
+			&order.Transport_allocate,
+			&order.Rental_from,
+			&order.Rental_to,
+			&order.Item_id,
+			&order.User_id,
+			&order.Day_price,
+			&order.Amount,
+			&order.Cancel_date,
+			&order.Cancel_status,
+			&order.Status); err != nil {
+			return order, err
+		}
+	}
+	return order, nil
 }
 
 func checkCanDelayCancelDay(orderID string, db *sql.DB) (bool, error) {
