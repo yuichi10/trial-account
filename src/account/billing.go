@@ -37,8 +37,10 @@ const (
 	TOKEN = "token"
 	//ユーザーID
 	USER_ID = "user_id"
+)
 
-	//ステータス
+const (
+	//オーダーステータス
 	STATUS_FAILED                 = "-1" //オーダーが同意されなかった時
 	STATUS_GET_PROVISION_SALE     = "1"  //仮売上をとった
 	STATUS_GET_REAL_SALE          = "2"  //実売上をとった
@@ -56,6 +58,7 @@ const CANCEL_FREE_DAY_LIMIT int = 4
 const CANCEL_RATE float64 = 0.2
 
 func TestDB(w http.ResponseWriter, r *http.Request) {
+
 	db, err := dbase.OpenDbr()
 	if err != nil {
 		fmt.Fprintf(w, "オープンERR: %v \n", err)
@@ -160,7 +163,7 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 		rentalTo = time.Date(y, time.Month(m), d, nowTime.Hour(), nowTime.Minute(), nowTime.Second(), 0, time.UTC)
 	}
 	//利用できる日かどうか
-	if !checkRentalDay(rentalFrom, rentalTo) {
+	if !checkRentalDay(rentalFrom, rentalTo, itemID, db) {
 		fmt.Fprintf(w, "%vから%vはレンタルできません\n", rentalFrom, rentalTo)
 		return
 	}
@@ -231,8 +234,6 @@ func ConsentOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
 	defer db.Close()
-	//アイテムのID
-	//itemID := r.Form.Get(ITEM_ID)
 	//オーダーのID
 	orderID := r.Form.Get(ORDER_ID)
 	//Orderのconsentをtrueに
@@ -291,6 +292,7 @@ func CanselOrder(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "レンタル日: %v \n ERR: %v \n", res, err)
 	//キャンセルをtrueに
 	if res {
+		//キャンセル料が書かなとき
 		t := time.Now()
 		dbSql = fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
 		stmt, err := db.Prepare(dbSql)
@@ -318,6 +320,7 @@ func CanselOrder(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(w, "仮売上の無効化: %v \n もしくはエラー: %v \n", res, err)
 	} else {
+		//キャンセル料がかかるとき
 		t := time.Now()
 		dbSql = fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
 		stmt, _ := db.Prepare(dbSql)
@@ -638,16 +641,66 @@ func checkStatus() {
 /**
  * かせるかどうかの日にち判定
  */
-func checkRentalDay(pre, post time.Time) bool {
+func checkRentalDay(from, to time.Time, itemID string, db *sql.DB) bool {
+	var able bool
+	if able = checkRentalProvisonLimit(from, to); !able {
+		return able
+	}
+
+	if able = checkDoubleBooking(from, to, itemID, db); !able {
+		return able
+	}
+	return true
+}
+
+func checkRentalProvisonLimit(from, to time.Time) bool {
 	nowTime := time.Now()
 	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
 	//契約できる日かどうか(今はとりあえず仮売上の日にちを超えないようになってるかどうか)
-	subDays := calcSubDate(nowTime, pre)
+	subDays := calcSubDate(nowTime, from)
 	if subDays > DAY_LIMIT {
 		return false
 	}
 	return true
-	//それ以外のオーダーでその日に被ってないかどうか
+}
+
+//その日にもう借りられてないかどうか
+func checkDoubleBooking(tFrom, tTo time.Time, itemID string, db *sql.DB) bool {
+	//始まりか終わりどちらかが利用期間にかかってる
+	var count int = 0
+	from := timeToStrYMD(tFrom)
+	to := timeToStrYMD(tTo)
+	dbSql := fmt.Sprintf("SELECT count(*) FROM %v WHERE %v=%v AND '%v' BETWEEN %v AND %v OR '%v' BETWEEN %v AND %v", ORDER, ITEM_ID, itemID, from, RENTAL_FROM, RENTAL_TO, to, RENTAL_FROM, RENTAL_TO)
+	fmt.Printf("sql: %v \n", dbSql)
+	res, err := db.Query(dbSql)
+	var count1 int
+	if err != nil {
+		return false
+	}
+	for res.Next() {
+		if err := res.Scan(&count1); err != nil {
+			return false
+		}
+	}
+	count += count1
+	//レンタルする間に他のレンタルがある場合
+	dbSql = fmt.Sprintf("SELECT count(*) FROM %v WHERE %v=%v AND '%v'<%v AND '%v'>%v", ORDER, ITEM_ID, itemID, from, RENTAL_FROM, to, RENTAL_TO)
+	fmt.Printf("sql: %v \n", dbSql)
+	res, err = db.Query(dbSql)
+	var count2 int
+	if err != nil {
+		return false
+	}
+	for res.Next() {
+		if err := res.Scan(&count2); err != nil {
+			return false
+		}
+	}
+	count += count2
+	if count == 0 {
+		return true
+	}
+	return false
 }
 
 /**
@@ -661,6 +714,15 @@ func divideTime(allTime string) (y, m, d int) {
 	m, _ = strconv.Atoi(divTime[1])
 	d, _ = strconv.Atoi(divTime[2])
 	return
+}
+
+//time型から y-m-dの形に治す
+func timeToStrYMD(t time.Time) string {
+	y := t.Year()
+	m := t.Month()
+	d := t.Day()
+	day := fmt.Sprintf("%v-%v-%v", y, m, d)
+	return day
 }
 
 /**
