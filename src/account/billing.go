@@ -335,6 +335,7 @@ func CanselOrder(w http.ResponseWriter, r *http.Request) {
 func DelayCanselReport(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
+	defer db.Close()
 	orderID := r.Form.Get(ORDER_ID)
 	isCancelStr := r.Form.Get(IS_CANCEL)
 	isCancel, _ := strconv.Atoi(isCancelStr)
@@ -346,9 +347,9 @@ func DelayCanselReport(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "キャンセル: %v\n", isCancel)
 	if isCancel != 0 {
 		t := time.Now()
-		dbSql := fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
+		dbSql := fmt.Sprintf("UPDATE %v SET %v=?, %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_STATUS, ORDER_ID)
 		stmt, _ := db.Prepare(dbSql)
-		_, err := stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_DELAY, orderID)
+		_, err := stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_DELAY, STATUS_CANCEL, orderID)
 		if err != nil {
 			fmt.Fprintf(w, "実行のエラー: %v \n ", err)
 			return
@@ -358,23 +359,28 @@ func DelayCanselReport(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "chargeID: %v \n ", err)
 			return
 		}
-		res, err := webpayCancelProvisionalSale(chID, r)
-		dbSql = fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_STATUS, ORDER_ID)
-		stmt, _ = db.Prepare(dbSql)
-		_, err = stmt.Exec(STATUS_FINISH, orderID)
+		rawjson, err := webpayCancelProvisionalSale(chID, r)
 		if err != nil {
-			fmt.Fprintf(w, "最終ステータスの変更: %v \n ", err)
+			if err := updateCancelOrderState(orderID, STATUS_FAILED_DELAY_CANCEL, db); err != nil {
+				fmt.Printf("webpayエラー: %v \n ", err)
+				return
+			}
+		}
+		js, _ := simplejson.NewJson([]byte(rawjson))
+		if ok, _ := checkCardError(js); !ok {
+			if err := updateCancelOrderState(orderID, STATUS_FAILED_DELAY_CANCEL, db); err != nil {
+				fmt.Printf("webpayエラー: %v \n ", err)
+			}
 			return
 		}
-		fmt.Fprintf(w, "仮売上の無効化: %v \n もしくはエラー: %v \n", res, err)
+		if err := updateCancelOrderState(orderID, ORDER_STATE_CANCEL_DELAY, db); err != nil {
+			fmt.Printf("キャンセルアップデートエラー: %v \n ", err)
+			return
+		}
 		return
 	} else {
-		t := time.Now()
-		dbSql := fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
-		stmt, _ := db.Prepare(dbSql)
-		_, err := stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_DELAY, orderID)
-		if err != nil {
-			fmt.Fprintf(w, "実行のエラー: %v \n ", err)
+		if err := updateOrderState(orderID, STATUS_CONTINUE_DELAY, db); err != nil {
+			fmt.Fprintf(w, "アップデータのエラー: %v \n", err)
 			return
 		}
 		chID, err := getChargeID(orderID, db)
@@ -383,15 +389,24 @@ func DelayCanselReport(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "chargeID: %v \n ", err)
 			return
 		}
-		res, err := webpayProvisionalToReal(chID, strconv.Itoa(amount), r)
-		dbSql = fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_STATUS, ORDER_ID)
-		stmt, _ = db.Prepare(dbSql)
-		_, err = stmt.Exec(STATUS_CANCEL, orderID)
+		rawjson, err := webpayProvisionalToReal(chID, strconv.Itoa(amount), r)
 		if err != nil {
-			fmt.Fprintf(w, "最終ステータスの変更: %v \n ", err)
+			if err := updateOrderState(orderID, STATUS_CONTINUE_DELAY_FAILED, db); err != nil {
+				fmt.Printf("webpayエラー: %v \n ", err)
+				return
+			}
+		}
+		js, _ := simplejson.NewJson([]byte(rawjson))
+		if ok, _ := checkCardError(js); !ok {
+			if err := updateOrderState(orderID, STATUS_CONTINUE_DELAY_FAILED, db); err != nil {
+				fmt.Printf("webpayエラー: %v \n ", err)
+			}
 			return
 		}
-		fmt.Fprintf(w, "仮売上の実売上: %v \n もしくはエラー: %v \n", res, err)
+		if err := updateOrderState(orderID, STATUS_CONTINUE_DELAY, db); err != nil {
+			fmt.Printf("キャンセルアップデートエラー: %v \n ", err)
+			return
+		}
 		return
 	}
 }

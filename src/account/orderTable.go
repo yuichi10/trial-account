@@ -38,17 +38,19 @@ const (
 
 const (
 	//オーダーステータス
-
-	STATUS_FAILED_REAL_SALE        = -4 //実売上の取得に失敗
-	STATUS_FAILED_CONSENT_PAY_BACK = -3 //オーダーがキャンセルされた時に仮売上をキャンセル失敗した時
-	STATUS_FAILED_CONSENT          = -2 //オーダーが同意されなかった時
-	STATUS_FAILED_PROVISION_SALE   = -1 //仮売上が取れなかった時
-	STATUS_GET_PROVISION_SALE      = 1  //仮売上をとった
-	STATUS_GET_CONSENT             = 2  //同意が取れた時
-	STATUS_CANCEL                  = 3  //キャンセルされた時
-	STATUS_GET_REAL_SALE           = 4  //実売上をとった
-	STATUS_WRITE_ON_CSV            = 5  //CSVに書き出し
-	STATUS_FINISH                  = 99 //すべての工程を終了
+	STATUS_CONTINUE_DELAY_FAILED        = -5
+	STATUS_FAILED_REAL_SALE             = -4 //実売上の取得に失敗
+	STATUS_FAILED_CONSENT_PAY_BACK      = -3 //オーダーがキャンセルされた時に仮売上をキャンセル失敗した時
+	STATUS_FAILED_CONSENT               = -2 //オーダーが同意されなかった時
+	STATUS_FAILED_PROVISION_SALE        = -1 //仮売上が取れなかった時
+	STATUS_GET_PROVISION_SALE           = 1  //仮売上をとった
+	STATUS_GET_CONSENT                  = 2  //同意が取れた時
+	STATUS_CANCEL                       = 3  //キャンセルされた時
+	STATUS_GET_REAL_SALE                = 4  //実売上をとった
+	STATUS_WRITE_ON_CSV                 = 5  //CSVに書き出し
+	STATUS_CONTINUE_DELAY               = 6  //遅延キャンセルをキャンセルして続ける場合
+	STATUS_CONTINUE_DELAY_GET_REAL_SALE = 7  //遅延キャンセルをして実売上をとった場合
+	STATUS_FINISH                       = 99 //すべての工程を終了
 )
 
 //利用日の次の日が44日目(仮売上期限の一日前)->利用日は仮売上期限の二日前
