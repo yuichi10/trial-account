@@ -41,11 +41,9 @@ const (
 
 func TestDB(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
-	sFrom := r.Form.Get(RENTAL_FROM)
-	from := strTimeToTime(sFrom)
-	//sFrom := r.Form.Get(RENTAL_TO)
-
-	fmt.Fprintf(w, "日にちの差 %v", checkRentalProvisonLimit(from))
+	db := dbase.OpenDB()
+	orderID := r.Form.Get(ORDER_ID)
+	checkDepositLimit(orderID, db)
 	/*
 		db, err := dbase.OpenDbr()
 		if err != nil {
@@ -359,10 +357,20 @@ func StartNegotiateDeposit(w http.ResponseWriter, r *http.Request) {
 	//保険料のデポジットをとれる期間かどうかの判定,もうすでにないかどうかの判定
 	r.ParseForm()
 	db := dbase.OpenDB()
+	defer db.Close()
 	orderID := r.Form.Get(ORDER_ID)
 	iOrderId, _ := strconv.Atoi(orderID)
 	itemID, _ := getItemID(orderID, db)
 	item, _ := getItemData(itemID, db)
+	if !checkOrderStatus(orderID, db, []int{STATUS_GET_REAL_SALE, STATUS_GET_CONSENT}...) {
+		//オーダーをチェックする
+		fmt.Fprintf(w, "ステータスの影響で作れません")
+		return
+	}
+	if !checkDepositLimit(orderID, db) {
+		fmt.Fprintf(w, "その期間はデポジットを作れません")
+		return
+	}
 	fmt.Fprintf(w, "Itme: %v \n", item)
 	deposit := new(depositType)
 	deposit.Order_id = iOrderId
@@ -434,7 +442,6 @@ func ConsentDeposit(w http.ResponseWriter, r *http.Request) {
 	userID := r.Form.Get(USER_ID)
 	order, err := getOrderInfo(orderID, db)
 	deposit, err := getDepositInfo(orderID, db)
-
 	var dbSql string
 	if userID != "" && userID == strconv.Itoa(order.User_id) {
 		fmt.Fprintln(w, "ユーザー")

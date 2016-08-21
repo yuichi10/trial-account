@@ -4,17 +4,21 @@ import (
 	"database/sql"
 	_ "encoding/json"
 	"fmt"
+	"time"
 	//"github.com/bitly/go-simplejson"
 )
 
 const (
+	DEPOSIT_STATE_FAILED_PROVISION_SALE = -5
+	DEPOSIT_STATE_FAILED_REAL_SALE      = -6
+	DEPOSIT_STATE_FAILED_WRITE_CSV      = -7
 	DEPOSIT_STATE_UPDATE                = 1 //アップデート中
 	DEPOSIT_STATE_RENT_AGREE            = 2
 	DEPOSIT_STATE_LEND_AGREE            = 3
 	DEPOSIT_STATE_BOTH_AGREE            = 4
 	DEPOSIT_STATE_GET_PROVISON_SALE     = 5
-	DEPOSIT_STATE_FAILED_PROVISION_SALE = 6
-	DEPOSIT_STATE_GET_REAL_SALE         = 7
+	DEPOSIT_STATE_GET_REAL_SALE         = 6
+	DEPOSIT_STATE_WRITE_CSV             = 7
 	DEPOSIT_STATE_FINISH                = 99
 )
 
@@ -27,6 +31,9 @@ const (
 	DEPOSIT_AMOUNT        = "amount"
 	DEPOSIT_STATUS        = "status"
 )
+
+//いまのところリミットは４日
+const DEPOSIT_TIME_PERIOD = 5759
 
 type depositType struct {
 	Order_id          int         `db:order_id`
@@ -65,4 +72,29 @@ func updateDepositState(orderID string, state int, db *sql.DB) error {
 
 func calcDepositAmount(deposit *depositType) int {
 	return (int)((float64)(deposit.Deposit_price) + (float64)(deposit.Delay_price)*deposit.Delay_day)
+}
+
+func checkDepositLimit(orderID string, db *sql.DB) bool {
+	dbSql := fmt.Sprintf("SELECT %v FROM %v WHERE %v=%v", RENTAL_TO, ORDER, ORDER_ID, orderID)
+	res, err := db.Query(dbSql)
+	if err != nil {
+		fmt.Printf("checkDepositLimitERR: %v \n", err)
+		return false
+	}
+	var to interface{}
+	for res.Next() {
+		if err := res.Scan(&to); err != nil {
+			fmt.Printf("read SQL DEPOSIT LIMIT ERR: %v \n", err)
+			return false
+		}
+	}
+	limitDay := to.(time.Time).AddDate(0, 0, 5)
+	nowTime := time.Now()
+	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), nowTime.Second(), nowTime.Nanosecond(), time.UTC)
+	subTime := limitDay.Sub((nowTime))
+	fmt.Printf("nowTime: %v \n limitDay: %v \n to: %v \n ", nowTime, limitDay, subTime.Minutes())
+	if subTime.Minutes() > DEPOSIT_TIME_PERIOD || subTime.Minutes() < 0 {
+		return false
+	}
+	return true
 }
