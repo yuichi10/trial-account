@@ -27,11 +27,38 @@ const (
 
 const (
 	//オーダーのキャンセルのステータス
-	ORDER_STATE_CANCEL_NONE  = "0" //キャンセル無し
-	ORDER_STATE_CANCEL_FREE  = "1" //無料のキャンセル
-	ORDER_STATE_CANCEL_PAID  = "2" //有料のキャンセル
-	ORDER_STATE_CANCEL_DELAY = "3"
+	STATUS_FAILED_DELAY_CANCEL = -3 //遅延によるキャンセルの失敗
+	STATUS_FAILED_CANCEL_PAY   = -2 //有料キャンセルの失敗
+	STATUS_FAILED_CANCEL_FREE  = -1 //無料キャンセルの失敗
+	ORDER_STATE_CANCEL_NONE    = 0  //キャンセル無し
+	ORDER_STATE_CANCEL_FREE    = 1  //無料のキャンセル
+	ORDER_STATE_CANCEL_PAID    = 2  //有料のキャンセル
+	ORDER_STATE_CANCEL_DELAY   = 3  //遅延キャンセル
 )
+
+const (
+	//オーダーステータス
+
+	STATUS_FAILED_REAL_SALE        = -4 //実売上の取得に失敗
+	STATUS_FAILED_CONSENT_PAY_BACK = -3 //オーダーがキャンセルされた時に仮売上をキャンセル失敗した時
+	STATUS_FAILED_CONSENT          = -2 //オーダーが同意されなかった時
+	STATUS_FAILED_PROVISION_SALE   = -1 //仮売上が取れなかった時
+	STATUS_GET_PROVISION_SALE      = 1  //仮売上をとった
+	STATUS_GET_CONSENT             = 2  //同意が取れた時
+	STATUS_CANCEL                  = 3  //キャンセルされた時
+	STATUS_GET_REAL_SALE           = 4  //実売上をとった
+	STATUS_WRITE_ON_CSV            = 5  //CSVに書き出し
+	STATUS_FINISH                  = 99 //すべての工程を終了
+)
+
+//利用日の次の日が44日目(仮売上期限の一日前)->利用日は仮売上期限の二日前
+const DAY_LIMIT int = 43
+
+//キャンセルの日
+const CANCEL_FREE_DAY_LIMIT int = 4
+
+//キャンセル料の割合
+const CANCEL_RATE float64 = 0.2
 
 type orderType struct {
 	Order_id           int         `db:order_id`
@@ -157,4 +184,35 @@ func getAmount(orderID string, db *sql.DB) (int, error) {
 		}
 	}
 	return amount, nil
+}
+
+func getOrderStatus(orderID string, db *sql.DB) (int, error) {
+	var state int
+	dbSql := fmt.Sprintf("SELECT %v FROM %v WHERE %v=%v", ORDER_STATUS, ORDER, ORDER_ID, orderID)
+	res, err := db.Query(dbSql)
+	if err != nil {
+		return 0, err
+	}
+	for res.Next() {
+		if err := res.Scan(&state); err != nil {
+			return 0, err
+		}
+	}
+	return state, nil
+}
+
+//オーダーのステータスの変更
+func updateOrderState(orderID string, state int, db *sql.DB) error {
+	dbSql := fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_STATUS, ORDER_ID)
+	stmt, err := db.Prepare(dbSql)
+	_, err = stmt.Exec(state, orderID)
+	return err
+}
+
+//キャンセルオーダーの設定
+func updateCancelOrderState(orderID string, state int, db *sql.DB) error {
+	dbSql := fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_CANCEL_STATE, ORDER_ID)
+	stmt, err := db.Prepare(dbSql)
+	_, err = stmt.Exec(state, orderID)
+	return err
 }
