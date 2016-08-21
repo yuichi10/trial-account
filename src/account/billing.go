@@ -127,9 +127,7 @@ func AddCustomer(w http.ResponseWriter, r *http.Request) {
 func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
-	//借りる側のユーザーID
 	userID := r.Form.Get(USER_ID)
-	//借りるアイテム
 	itemID := r.Form.Get(ITEM_ID)
 	//レンタル期間
 	rTo := r.Form.Get(RENTAL_TO)
@@ -139,8 +137,6 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
 	//レンタル開始日
 	rentalFrom := strTimeToTime(rFrom)
-	//y, m, d := divideTime(rFrom)
-	//rentalFrom := time.Date(y, time.Month(m), d, nowTime.Hour(), nowTime.Minute(), nowTime.Second(), 0, time.UTC)
 	//レンタル終了日
 	var rentalTo time.Time
 	if rTo == "" {
@@ -155,21 +151,9 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%vから%vはレンタルできません\n", rentalFrom, rentalTo)
 		return
 	}
-
+	var dbSql string
 	//アイテムの情報を取得(料金などを設定するため)
-	iData := new(itemData)
-	dbSql := fmt.Sprintf("SELECT * FROM items where %v=%v", ITEM_ID, itemID)
-	res, err := db.Query(dbSql)
-	if err != nil {
-		fmt.Fprintf(w, "%v \n select item ERR: %v\n", dbSql, err)
-		return
-	}
-	for res.Next() {
-		if err := res.Scan(&iData.Item_id, &iData.User_id, &iData.Product_name, &iData.Oneday_price, &iData.Longday_price, &iData.Deposit_price, &iData.Delay_price); err != nil {
-			fmt.Fprintf(w, "scan item err: %v", err)
-			return
-		}
-	}
+	iData, _ := getItemData(itemID, db)
 	fmt.Fprintf(w, "プロダクトデータ: %v \n", iData)
 
 	//料金を設定
