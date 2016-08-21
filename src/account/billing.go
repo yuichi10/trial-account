@@ -339,6 +339,10 @@ func DelayCanselReport(w http.ResponseWriter, r *http.Request) {
 	orderID := r.Form.Get(ORDER_ID)
 	isCancelStr := r.Form.Get(IS_CANCEL)
 	isCancel, _ := strconv.Atoi(isCancelStr)
+	if !checkOrderStatus(orderID, db, []int{STATUS_GET_CONSENT}...) {
+		fmt.Fprintf(w, "ステータスの影響でできません \n")
+		return
+	}
 	is, err := checkCanDelayCancelDay(orderID, db)
 	if !is || err != nil {
 		fmt.Fprintf(w, "できません.\nERR: %v\n", err)
