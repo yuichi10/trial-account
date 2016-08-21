@@ -299,8 +299,18 @@ func DisagreeOrder(w http.ResponseWriter, r *http.Request) {
 func CanselOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
-	var dbSql string
 	orderID := r.Form.Get(ORDER_ID)
+	if checkOrderStatus(orderID, db, []int{STATUS_GET_PROVISION_SALE}...) {
+		//まだ相手が同意してない時は無料でキャンセル
+		fmt.Fprintf(w, "まだ同意していないため無料でのキャンセル")
+		freeCancel(orderID, db, r)
+		return
+	}
+
+	if !checkOrderStatus(orderID, db, []int{STATUS_GET_CONSENT}...) {
+		fmt.Fprintf(w, "ステータスによりキャンセルできません\n")
+		return
+	}
 	res, err := canCancelFree(orderID, db)
 	if err != nil {
 		fmt.Fprintf(w, "借りれるかエラー%v \n", err)
@@ -310,58 +320,10 @@ func CanselOrder(w http.ResponseWriter, r *http.Request) {
 	//キャンセルをtrueに
 	if res {
 		//キャンセル料がかからない時
-		t := time.Now()
-		dbSql = fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
-		stmt, err := db.Prepare(dbSql)
-		if err != nil {
-			fmt.Fprintf(w, "str: %v \nstmt ERR: %v \n", dbSql, err)
-			return
-		}
-		_, err = stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_FREE, orderID)
-		if err != nil {
-			fmt.Fprintf(w, "実行のエラー: %v \n ", err)
-			return
-		}
-		chID, err := getChargeID(orderID, db)
-		if err != nil {
-			fmt.Fprintf(w, "chargeID: %v \n ", err)
-			return
-		}
-		res, err := webpayCancelProvisionalSale(chID, r)
-		dbSql = fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_STATUS, ORDER_ID)
-		stmt, _ = db.Prepare(dbSql)
-		_, err = stmt.Exec(STATUS_FINISH, orderID)
-		if err != nil {
-			fmt.Fprintf(w, "最終ステータスの変更: %v \n ", err)
-			return
-		}
-		fmt.Fprintf(w, "仮売上の無効化: %v \n もしくはエラー: %v \n", res, err)
+		freeCancel(orderID, db, r)
 	} else {
 		//キャンセル料がかかるとき
-		t := time.Now()
-		dbSql = fmt.Sprintf("UPDATE %v SET %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_ID)
-		stmt, _ := db.Prepare(dbSql)
-		_, err := stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_PAID, orderID)
-		if err != nil {
-			fmt.Fprintf(w, "実行のエラー: %v \n ", err)
-			return
-		}
-		chID, err := getChargeID(orderID, db)
-		amount, err := getAmount(orderID, db)
-		var amountFloat float64 = CANCEL_RATE * float64(amount)
-		amount = int(amountFloat)
-		res, err := webpayProvisionalToReal(chID, strconv.Itoa(amount), r)
-		if err != nil {
-			return
-		}
-		dbSql = fmt.Sprintf("UPDATE %v SET %v=? WHERE %v=?", ORDER, ORDER_STATUS, ORDER_ID)
-		stmt, _ = db.Prepare(dbSql)
-		_, err = stmt.Exec(STATUS_FINISH, orderID)
-		if err != nil {
-			fmt.Fprintf(w, "最終ステータスの変更: %v \n ", err)
-			return
-		}
-		fmt.Fprintf(w, "キャンセル料: %v 円 : %v　円 \n 一部の実売上か: %v \n もしくはエラー: %v \n", amount, amountFloat, res, err)
+		payCancel(orderID, db, r)
 	}
 }
 
@@ -616,6 +578,78 @@ func ConsentDeposit(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "オーダー: %v \n エラー: %v \n", order, err)
 }
 
+//無料のキャンセル
+func freeCancel(orderID string, db *sql.DB, r *http.Request) {
+	t := time.Now()
+	dbSql := fmt.Sprintf("UPDATE %v SET %v=?, %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_STATUS, ORDER_ID)
+	stmt, err := db.Prepare(dbSql)
+	if err != nil {
+		fmt.Printf("str: %v \nstmt ERR: %v \n", dbSql, err)
+		return
+	}
+	_, err = stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_FREE, STATUS_CANCEL, orderID)
+	if err != nil {
+		fmt.Printf("実行のエラー: %v \n ", err)
+		return
+	}
+	chID, err := getChargeID(orderID, db)
+	if err != nil {
+		fmt.Printf("chargeID: %v \n ", err)
+		return
+	}
+	rawjson, err := webpayCancelProvisionalSale(chID, r)
+	if err != nil {
+		if err := updateCancelOrderState(orderID, STATUS_FAILED_CANCEL_FREE, db); err != nil {
+			fmt.Printf("webpayエラー: %v \n ", err)
+			return
+		}
+	}
+	js, _ := simplejson.NewJson([]byte(rawjson))
+	if ok, _ := checkCardError(js); !ok {
+		if err := updateCancelOrderState(orderID, STATUS_FAILED_CANCEL_FREE, db); err != nil {
+			fmt.Printf("webpayエラー: %v \n ", err)
+		}
+		return
+	}
+	if err := updateCancelOrderState(orderID, ORDER_STATE_CANCEL_FREE, db); err != nil {
+		fmt.Printf("キャンセルアップデートエラー: %v \n ", err)
+		return
+	}
+}
+
+func payCancel(orderID string, db *sql.DB, r *http.Request) {
+	t := time.Now()
+	dbSql := fmt.Sprintf("UPDATE %v SET %v=?, %v=?, %v=? WHERE %v=?", ORDER, ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_STATUS, ORDER_ID)
+	stmt, _ := db.Prepare(dbSql)
+	_, err := stmt.Exec(t.Format("2006-01-02 15:04:05"), ORDER_STATE_CANCEL_PAID, STATUS_CANCEL, orderID)
+	if err != nil {
+		fmt.Printf("実行のエラー: %v \n ", err)
+		return
+	}
+	chID, err := getChargeID(orderID, db)
+	amount, err := getAmount(orderID, db)
+	var amountFloat float64 = CANCEL_RATE * float64(amount)
+	amount = int(amountFloat)
+	rawjson, err := webpayProvisionalToReal(chID, strconv.Itoa(amount), r)
+	if err != nil {
+		if err := updateCancelOrderState(orderID, STATUS_FAILED_CANCEL_PAY, db); err != nil {
+			fmt.Printf("webpayエラー: %v \n ", err)
+			return
+		}
+	}
+	js, _ := simplejson.NewJson([]byte(rawjson))
+	if ok, _ := checkCardError(js); !ok {
+		if err := updateCancelOrderState(orderID, STATUS_FAILED_CANCEL_PAY, db); err != nil {
+			fmt.Printf("webpayエラー: %v \n ", err)
+		}
+		return
+	}
+	if err := updateCancelOrderState(orderID, ORDER_STATE_CANCEL_PAID, db); err != nil {
+		fmt.Printf("キャンセルアップデートエラー: %v \n ", err)
+		return
+	}
+}
+
 /**
  * リクエストで送られたデータのチェック
  * @return {[type]} [description]
@@ -642,6 +676,7 @@ func canCancelFree(orderID string, db *sql.DB) (bool, error) {
 	//rentalStartDate := time.Time(rentalStartDateStr)
 	rentalStartDate := rentalStartDateInter.(time.Time)
 	subDays := calcSubDate(time.Now(), rentalStartDate)
+	fmt.Printf("かすまでの日数: %v \n ", subDays)
 	if subDays <= CANCEL_FREE_DAY_LIMIT {
 		return false, nil
 	}
@@ -681,6 +716,10 @@ func checkRentalDay(from, to time.Time, itemID string, db *sql.DB) bool {
 	return true
 }
 
+func checkRentalDayStart() {
+	//今日より過去の場合もしくは開始日の一日前より以前は予約できないようにする
+}
+
 func checkRentalProvisonLimit(from time.Time) bool {
 	nowTime := time.Now()
 	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
@@ -696,10 +735,13 @@ func checkRentalProvisonLimit(from time.Time) bool {
 //その日にもう借りられてないかどうか
 func checkDoubleBooking(tFrom, tTo time.Time, itemID string, db *sql.DB) bool {
 	//始まりか終わりどちらかが利用期間にかかってる
+	//SELECT count(*) FROM orders WHERE (item_id=4 AND (status=1 OR status=2)) AND ('2016-8-22' BETWEEN rental_from AND rental_to OR '2016-8-22' BETWEEN rental_from AND rental_to);
 	var count int = 0
 	from := timeToStrYMD(tFrom)
 	to := timeToStrYMD(tTo)
-	dbSql := fmt.Sprintf("SELECT count(*) FROM %v WHERE %v=%v AND '%v' BETWEEN %v AND %v OR '%v' BETWEEN %v AND %v", ORDER, ITEM_ID, itemID, from, RENTAL_FROM, RENTAL_TO, to, RENTAL_FROM, RENTAL_TO)
+	//ステイトの部分のsql
+	dbState := fmt.Sprintf("(%v=%v OR %v=%v)", ORDER_STATUS, STATUS_GET_PROVISION_SALE, ORDER_STATUS, STATUS_GET_CONSENT)
+	dbSql := fmt.Sprintf("SELECT count(*) FROM %v WHERE (%v=%v AND %v) AND ('%v' BETWEEN %v AND %v OR '%v' BETWEEN %v AND %v)", ORDER, ITEM_ID, itemID, dbState, from, RENTAL_FROM, RENTAL_TO, to, RENTAL_FROM, RENTAL_TO)
 	fmt.Printf("sql: %v \n", dbSql)
 	res, err := db.Query(dbSql)
 	var count1 int
@@ -713,7 +755,7 @@ func checkDoubleBooking(tFrom, tTo time.Time, itemID string, db *sql.DB) bool {
 	}
 	count += count1
 	//レンタルする間に他のレンタルがある場合
-	dbSql = fmt.Sprintf("SELECT count(*) FROM %v WHERE %v=%v AND '%v'<%v AND '%v'>%v", ORDER, ITEM_ID, itemID, from, RENTAL_FROM, to, RENTAL_TO)
+	dbSql = fmt.Sprintf("SELECT count(*) FROM %v WHERE (%v=%v AND %v) AND ('%v'<%v AND '%v'>%v)", ORDER, ITEM_ID, itemID, dbState, from, RENTAL_FROM, to, RENTAL_TO)
 	fmt.Printf("sql: %v \n", dbSql)
 	res, err = db.Query(dbSql)
 	var count2 int

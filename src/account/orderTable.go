@@ -120,7 +120,7 @@ func checkCanDelayCancelDay(orderID string, db *sql.DB) (bool, error) {
 
 	nowTime := time.Now()
 	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), nowTime.Minute(), nowTime.Second(), time.UTC)
-	fmt.Printf("day: %v\nnow: %v\n", rentalFrom, nowTime)
+	fmt.Printf("day: %v\n now: %v\n", rentalFrom, nowTime)
 	subTime := nowTime.Sub(rentalFrom.(time.Time))
 	fmt.Printf("sub: %v \n", subTime)
 	if subTime.Hours() >= 24 || subTime.Hours() < 0 {
