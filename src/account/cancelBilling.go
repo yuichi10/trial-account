@@ -2,6 +2,7 @@ package account
 
 import (
 	"database/sql"
+	"dbase"
 	_ "encoding/json"
 	"fmt"
 	"github.com/bitly/go-simplejson"
@@ -9,6 +10,73 @@ import (
 	"strconv"
 	"time"
 )
+
+/**
+ * オーダーのキャンセル(借りる側)
+ * @param {[type]} w http.ResponseWriter [description]
+ * @param {[type]} r *http.Request       [description]
+ */
+func CanselOrder(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	db := dbase.OpenDB()
+	orderID := r.Form.Get(ORDER_ID)
+	if checkOrderStatus(orderID, db, []int{STATUS_GET_PROVISION_SALE}...) {
+		//まだ相手が同意してない時は無料でキャンセル
+		fmt.Fprintf(w, "まだ同意していないため無料でのキャンセル")
+		freeCancel(orderID, db, r)
+		return
+	}
+
+	if !checkOrderStatus(orderID, db, []int{STATUS_GET_CONSENT}...) {
+		fmt.Fprintf(w, "ステータスによりキャンセルできません\n")
+		return
+	}
+	res, err := canCancelFree(orderID, db)
+	if err != nil {
+		fmt.Fprintf(w, "借りれるかエラー%v \n", err)
+		return
+	}
+	fmt.Fprintf(w, "レンタル日: %v \n ERR: %v \n", res, err)
+	//キャンセルをtrueに
+	if res {
+		//キャンセル料がかからない時
+		freeCancel(orderID, db, r)
+	} else {
+		//キャンセル料がかかるとき
+		payCancel(orderID, db, r)
+	}
+}
+
+/**
+ * 借りる側が商品が遅れたことによるキャンセルまたは続行のレポート(利用日初日の24時間のみ)
+ * @param {[type]} w http.ResponseWriter [description]
+ * @param {[type]} r *http.Request       [description]
+ */
+func DelayCanselReport(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	db := dbase.OpenDB()
+	defer db.Close()
+	orderID := r.Form.Get(ORDER_ID)
+	isCancelStr := r.Form.Get(IS_CANCEL)
+	isCancel, _ := strconv.Atoi(isCancelStr)
+	if !checkOrderStatus(orderID, db, []int{STATUS_GET_CONSENT}...) {
+		fmt.Fprintf(w, "ステータスの影響でできません \n")
+		return
+	}
+	is, err := checkCanDelayCancelDay(orderID, db)
+	if !is || err != nil {
+		fmt.Fprintf(w, "できません.\nERR: %v\n", err)
+		return
+	}
+	fmt.Fprintf(w, "キャンセル: %v\n", isCancel)
+	if isCancel != 0 {
+		//キャンセルを選んだ時
+		delayChooseCancel(orderID, db, r)
+	} else {
+		//使い続ける時
+		delayChooseContinue(orderID, db, r)
+	}
+}
 
 //無料のキャンセル
 func freeCancel(orderID string, db *sql.DB, r *http.Request) {
