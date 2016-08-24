@@ -23,6 +23,7 @@ const (
 	ORDER_CANCEL_STATE = "cancel_status"
 	ORDER_AMOUNT       = "amount"
 	IS_CANCEL          = "is_cancel"
+	ORDER_MANAGEMENT_CHARGE = "management_charge"
 )
 
 const (
@@ -72,6 +73,7 @@ type orderType struct {
 	Item_id            int         `db:item_id`
 	User_id            int         `db:user_id`
 	Day_price          int         `db:day_price`
+	Management_charge  int 		   `db:management_charge`
 	Amount             int         `db:amount`
 	Cancel_date        interface{} `db:cancel_date`
 	Cancel_status      int         `db:cancel_status`
@@ -97,6 +99,7 @@ func getOrderInfo(orderID string, db *sql.DB) (*orderType, error) {
 			&order.Item_id,
 			&order.User_id,
 			&order.Day_price,
+			&order.Management_charge,
 			&order.Amount,
 			&order.Cancel_date,
 			&order.Cancel_status,

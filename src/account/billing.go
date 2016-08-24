@@ -9,12 +9,12 @@ import (
 	"net/http"
 	_ "reflect"
 	"strconv"
-	"strings"
 	"time"
 )
 
 //insert into orders (transport_allocate,rental_from,rental_to, item_id, user_id, day_price)
 //insert into items(user_id, product_name, oneday_price, longday_price, deposit_price, delay_price) values (3, 'Nikon', 5000, 4000, 10000, 6000)
+//select * from orders where 
 
 ///orderに料金を設定する理由は後でプロダクトの値段が変わったらレシートの意味がないから
 //orderのお金が仮売上→実売上のステータスを持っておくべき
@@ -40,50 +40,48 @@ const (
 
 	//予約できる日にち（利用日からの日数)
 	CAN_BOOK_DAY_FROM_RENTAL_FROM = -4
+
+	//予約できるマージンの日数
+	BOOK_MARGIN_DAYS = 3
+)
+
+const (
+	//返す値のステータス
+	SUCCESS = 1
+	FAILED_PROVISON_SALE=2
 )
 
 func TestDB(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-	//db := dbase.OpenDB()
+	/*r.ParseForm()
+	db := dbase.OpenDB()
 	fromStr := r.Form.Get(RENTAL_FROM)
 	from := strTimeToTime(fromStr)
-	fmt.Fprintf(w, "result : %v", checkRentalDayStart(from))
-		/*
-		db, err := dbase.OpenDbr()
-		if err != nil {
-			fmt.Fprintf(w, "オープンERR: %v \n", err)
-		}
-		tx, err := db.Begin()
-		if err != nil {
-			fmt.Fprintf(w, "トランザクションエラー: %v \n", err)
+	preMarginDay := from.AddDate(0,0,-BOOK_MARGIN_DAYS)
+	toStr := r.Form.Get(RENTAL_TO)
+	to := strTimeToTime(toStr)
+	postMarginDay := to.AddDate(0,0, BOOK_MARGIN_DAYS)
+	//select * from orders where '2016-09-08'>rental_to order by rental_to desc limit 1
+	//SELECT rental_to, order_id FROM orders WHERE '2016-09-15'<rental_to order by rental_to desc limit 1
+	//select * from orders where '2016-09-13'<rental_from order by rental_from asc limit 5
+	//from := strTimeToTime(fromStr)
+	//一個前の日程を調べる
+	dbWhere := fmt.Sprintf("'%v'>%v", timeToStrYMD(preMarginDay), RENTAL_TO)
+	dbSql := fmt.Sprintf("SELECT %v, %v FROM %v WHERE %v ", RENTAL_TO, ORDER_ID, ORDER, dbWhere)
+	fmt.Fprintf(w, "sql: %v ", dbSql)
+	var near_rental_end time.Time
+	var orderID int
+	res, err := db.Query(dbSql)
+	if err != nil {
+		fmt.Fprintf(w, "query err: %v ", err)
+		return
+	}
+	for res.Next() {
+		if err := res.Scan(&near_rental_end, &orderID); err != nil {
+			fmt.Fprintf(w, "scan err: %v ", err)
 			return
 		}
-		_, err = db.InsertInto("items").
-			Columns("user_id", "product_name", "oneday_price", "longday_price", "deposit_price", "delay_price").
-			Values(3, "Canon E 10", 4800, 4200, 12000, 7000).
-			Exec()
-		if err != nil {
-			tx.Rollback()
-			return
-		} else {
-
-			err := tx.Rollback()
-			fmt.Fprintf(w, "できたけどロールバック: %v \n", err)
-			return
-		}
-		var ot []orderType
-
-		db.Select("*").From("items").Load(&ot)
-		fmt.Fprintf(w, "製品一覧 %v", ot[0])
-		tx.Commit()*/
-	//db := dbase.OpenDB()
-	//defer db.Close()
-	//tx, err := db.Begin()
-	//if err != nil {
-	//	fmt.Fprintf(w, "トランザクションエラー")
-	//	return
-	//}
-	//dbSql := "INSERT INTO items (user_id, product_name, oneday_price, longday_price, deposit_price, delay_price) VALUES(?, ?, ?, ?, ?, ?)"
+		fmt.Fprintf(w, "一番近いレンタル\norderID: %v\n最後の日: %v", orderID, near_rental_end)
+	}*/
 }
 
 /**
@@ -161,18 +159,20 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	//料金を設定
 	var dayPrice int
 	var amount int
+	//運営料金
+	managePrice := 0
 	if period := calcSubDate(rentalFrom, rentalTo); (period + 1) > 1 {
 		dayPrice = iData.Longday_price
-		amount = (period + 1) * dayPrice
+		amount = (period + 1) * dayPrice + managePrice
 	} else {
 		dayPrice = iData.Oneday_price
-		amount = dayPrice
+		amount = dayPrice + managePrice
 	}
 	fmt.Fprintf(w, "一日の料金は%v 合計料金は%v　です。\n", dayPrice, amount)
 	//新しいオーダーの作成
-	dbSql = "INSERT orders SET transport_allocate=?, rental_from=?, rental_to=?, item_id=?, user_id=?, day_price=?, amount=?"
+	dbSql = "INSERT orders SET transport_allocate=?, rental_from=?, rental_to=?, item_id=?, user_id=?, day_price=?, management_charge=?, amount=?"
 	stmt, _ := db.Prepare(dbSql)
-	insRes, err := stmt.Exec(0, rFrom, rTo, itemID, userID, dayPrice, amount)
+	insRes, err := stmt.Exec(0, rFrom, rTo, itemID, userID, dayPrice, managePrice, amount)
 	if err != nil {
 		fmt.Fprintf(w, "オーダーのエラー: %v \n", err)
 		return
@@ -218,7 +218,12 @@ func ConsentOrder(w http.ResponseWriter, r *http.Request) {
 	db := dbase.OpenDB()
 	defer db.Close()
 	orderID := r.Form.Get(ORDER_ID)
+	itemID := r.Form.Get(ITEM_ID)
 	order, _ := getOrderInfo(orderID, db)
+	if (itemID != strconv.Itoa(order.Item_id)) {
+		fmt.Fprintf(w, "商品が間違っています")
+		return
+	}
 	//予約できる期間を過ぎていたら同意できない
 	if !checkRentalDayStart(order.Rental_from.(time.Time)) {
 		fmt.Fprintf(w, "もうすでに予約できません")
@@ -325,22 +330,24 @@ func checkRentalDay(from, to time.Time, itemID string, db *sql.DB) bool {
 	if able = checkRentalDayStart(from); !able {
 		return able
 	}
+	//前後のレンタルの日程を調べてマージンが足りなかった場合予約できないようにする
 	return true
 }
 
+//レンタルがスタートする人予約できる日の制限をチェックする
 func checkRentalDayStart(from time.Time) bool {
-	
 	nowDay := time.Now()
 	nowDay = timeToTimeYMD(nowDay)
 	canRentalDay := from.AddDate(0,0,CAN_BOOK_DAY_FROM_RENTAL_FROM)
 	subTime := canRentalDay.Sub(nowDay)
-	fmt.Printf(" today: %v \n rental from : %v \n canRental: %v \n subMinutes: %v \n \n ", nowDay, from, canRentalDay, subTime.Hours())
+	fmt.Printf(" today: %v\nrental from : %v\ncanRental: %v\nsubMinutes: %v\n\n", nowDay, from, canRentalDay, subTime.Hours())
 	if subTime.Minutes() < 0 {
 		return false
 	}
 	return true
 }
 
+//仮売上の日程からチェック
 func checkRentalProvisonLimit(from time.Time) bool {
 	nowTime := time.Now()
 	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
@@ -358,11 +365,15 @@ func checkDoubleBooking(tFrom, tTo time.Time, itemID string, db *sql.DB) bool {
 	//始まりか終わりどちらかが利用期間にかかってる
 	//SELECT count(*) FROM orders WHERE (item_id=4 AND (status=1 OR status=2)) AND ('2016-8-22' BETWEEN rental_from AND rental_to OR '2016-8-22' BETWEEN rental_from AND rental_to);
 	var count int = 0
-	from := timeToStrYMD(tFrom)
-	to := timeToStrYMD(tTo)
+	marginFrom := tFrom.AddDate(0,0,-BOOK_MARGIN_DAYS)
+	marginTo := tTo.AddDate(0,0,BOOK_MARGIN_DAYS)
+	from := timeToStrYMD(marginFrom)
+	to := timeToStrYMD(marginTo)
+	fmt.Printf("from -> to : %v -> %v \n", from, to)
 	//ステータスのsql
 	dbState := fmt.Sprintf("(%v=%v)", ORDER_STATUS, STATUS_GET_CONSENT)
-	dbSql := fmt.Sprintf("SELECT count(*) FROM %v WHERE (%v=%v AND %v) AND ('%v' BETWEEN %v AND %v OR '%v' BETWEEN %v AND %v)", ORDER, ITEM_ID, itemID, dbState, from, RENTAL_FROM, RENTAL_TO, to, RENTAL_FROM, RENTAL_TO)
+	dbWhereTime := fmt.Sprintf("('%v' BETWEEN %v AND %v OR '%v' BETWEEN %v AND %v)", from, RENTAL_FROM, RENTAL_TO, to, RENTAL_FROM, RENTAL_TO)
+	dbSql := fmt.Sprintf("SELECT count(*) FROM %v WHERE (%v=%v AND %v) AND %v", ORDER, ITEM_ID, itemID, dbState, dbWhereTime)
 	fmt.Printf("sql: %v \n", dbSql)
 	res, err := db.Query(dbSql)
 	var count1 int
@@ -397,8 +408,10 @@ func checkDoubleBooking(tFrom, tTo time.Time, itemID string, db *sql.DB) bool {
 
 func cancelOtherBookings(tFrom, tTo time.Time, itemID string, db *sql.DB) {
 	r := new(http.Request)
-	from := timeToStrYMD(tFrom)
-	to := timeToStrYMD(tTo)
+	marginFrom := tFrom.AddDate(0,0,-BOOK_MARGIN_DAYS)
+	marginTo := tTo.AddDate(0,0,BOOK_MARGIN_DAYS)
+	from := timeToStrYMD(marginFrom)
+	to := timeToStrYMD(marginTo)
 	//ステータスのsql
 	dbState := fmt.Sprintf("(%v=%v)", ORDER_STATUS, STATUS_GET_PROVISION_SALE)
 	dbSql := fmt.Sprintf("SELECT %v FROM %v WHERE (%v=%v AND %v) AND ('%v' BETWEEN %v AND %v OR '%v' BETWEEN %v AND %v)", ORDER_ID, ORDER, ITEM_ID, itemID, dbState, from, RENTAL_FROM, RENTAL_TO, to, RENTAL_FROM, RENTAL_TO)
@@ -435,45 +448,3 @@ func cancelOtherBookings(tFrom, tTo time.Time, itemID string, db *sql.DB) {
 	}
 }
 
-/**
- * 2016-02-12 の形を崩す
- * @param  {[type]} allTime string)       (y, m, d int [description]
- * @return {[type]}         [description]
- */
-func divideTime(allTime string) (y, m, d int) {
-	divTime := strings.Split(allTime, "-")
-	y, _ = strconv.Atoi(divTime[0])
-	m, _ = strconv.Atoi(divTime[1])
-	d, _ = strconv.Atoi(divTime[2])
-	return
-}
-
-func strTimeToTime(strTime string) time.Time {
-	y, m, d := divideTime(strTime)
-	return time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC)
-}
-
-//time型から y-m-dの形に治す
-func timeToStrYMD(t time.Time) string {
-	y := t.Year()
-	m := int(t.Month())
-	d := t.Day()
-	day := fmt.Sprintf("%v-%v-%v", y, m, d)
-	return day
-}
-
-func timeToTimeYMD(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
-}
-
-/**
- * 借りる日数を計算
- */
-func calcSubDate(pre, post time.Time) int {
-	subTime := post.Sub(pre)
-	days := int(subTime.Hours()) / 24
-	if subTime.Minutes()/(24*60)-float64(days) > 0 {
-		days += 1
-	}
-	return days
-}

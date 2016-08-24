@@ -10,16 +10,16 @@ import (
 
 func main() {
 	http.HandleFunc("/", helloGo)
-	http.HandleFunc("/account/TestDB", account.TestDB)
-	http.HandleFunc("/account/PublishOrder", account.PublishOrder)
-	http.HandleFunc("/account/AddCustomer", account.AddCustomer)
-	http.HandleFunc("/account/ConsentOrder", account.ConsentOrder)
-	http.HandleFunc("/account/DisagreeOrder", account.DisagreeOrder)
-	http.HandleFunc("/account/CanselOrder", account.CanselOrder)
-	http.HandleFunc("/account/DelayCanselReport", account.DelayCanselReport)
-	http.HandleFunc("/account/StartNegotiateDeposit", account.StartNegotiateDeposit)
-	http.HandleFunc("/account/UpdateDeposit", account.UpdateDeposit)
-	http.HandleFunc("/account/ConsentDeposit", account.ConsentDeposit)
+	http.HandleFunc("/account/testDB", account.TestDB)
+	http.HandleFunc("/account/publishOrder", account.PublishOrder)
+	http.HandleFunc("/account/addCustomer", account.AddCustomer)
+	http.HandleFunc("/account/consentOrder", account.ConsentOrder)
+	http.HandleFunc("/account/disagreeOrder", account.DisagreeOrder)
+	http.HandleFunc("/account/canselOrder", account.CanselOrder)
+	http.HandleFunc("/account/delayCanselReport", account.DelayCanselReport)
+	http.HandleFunc("/account/startNegotiateDeposit", account.StartNegotiateDeposit)
+	http.HandleFunc("/account/updateDeposit", account.UpdateDeposit)
+	http.HandleFunc("/account/consentDeposit", account.ConsentDeposit)
 	http.ListenAndServe(":9977", context.ClearHandler(http.DefaultServeMux))
 }
 
