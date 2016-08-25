@@ -81,6 +81,10 @@ type orderType struct {
 	Status             int         `db:status`
 }
 
+func insertOrderInfo(){
+	
+}
+
 func getOrderInfo(orderID string, db *sql.DB) (*orderType, error) {
 	dbSql := fmt.Sprintf("SELECT * FROM %v WHERE %v=?", ORDER, ORDER_ID)
 	//stmt, err := db.Prepare(dbSql)

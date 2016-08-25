@@ -12,69 +12,26 @@ import (
 	"time"
 )
 
-//insert into orders (transport_allocate,rental_from,rental_to, item_id, user_id, day_price)
-//insert into items(user_id, product_name, oneday_price, longday_price, deposit_price, delay_price) values (3, 'Nikon', 5000, 4000, 10000, 6000)
-//select * from orders where 
-
-///orderに料金を設定する理由は後でプロダクトの値段が変わったらレシートの意味がないから
-//orderのお金が仮売上→実売上のステータスを持っておくべき
-//depositもお金をとったかどうかのステータスを持っておくべき
-
-//キャンセル0 キャンセルなし
-//キャンセル1　通常キャンセル
-//キャンセル2 遅延によるキャンセル
-
-//ステータス
-//オーダーの同意がキャンセルもしくは仮売上が取得できなかった時-1
-//オーダーが存在している0
-//仮売上をとった1
-//実売上をとった2
-//デポジットをを考えている 3
-//すべての工程が終了
-
 const (
 	//トークン
 	TOKEN = "token"
-	//ユーザーID
-	USER_ID = "user_id"
-
 	//予約できる日にち（利用日からの日数)
 	CAN_BOOK_DAY_FROM_RENTAL_FROM = -4
 
 	//予約できるマージンの日数
 	BOOK_MARGIN_DAYS = 3
-)
-
-const (
-	//返す値のステータス
-	SUCCESS = 1
-	FAILED_PROVISON_SALE=2
+	MANAGEMENT_PRICE_RATE = 0
+	INSURANCE_PRICE_RATE = 0
 )
 
 type resPropriety struct {
 	IsSuccess bool `json:"isSuccess"`
 	Error string `json:"error"`
-
 }
 
 var internalErrorJson string = "{\"error\":\"internal error\"}"
 
 func TestDB(w http.ResponseWriter, r *http.Request) {
-	if checkUserID("2") {
-		fmt.Fprintln(w, "数字")
-	} else {
-		fmt.Fprintln(w, "違う")
-	}
-	if checkUserID("s") {
-		fmt.Fprintln(w, "数字")
-	} else {
-		fmt.Fprintln(w, "違う")
-	}
-	if checkUserID("1000") {
-		fmt.Fprintln(w, "数字")
-	} else {
-		fmt.Fprintln(w, "違う")
-	}
 	//テスト
 }
 
@@ -122,19 +79,35 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
 	userID := r.Form.Get(USER_ID)
-	if !checkUserID(userID) {
-		//ユーザーのチェックを追加
+	if !isExitInDBUnique(USER, USER_ID, userID, db) {
+		//ユーザーのIDチェック
+		proprietyResponse(false, "ユーザーIDが間違ってます", w)
 		return
 	}
 	itemID := r.Form.Get(ITEM_ID)
+	if !isExitInDBUnique(ITEM, ITEM_ID, itemID, db) {
+		//アイテムIDのチェック
+		proprietyResponse(false, "アイテムIDが間違ってます", w)
+		return
+	}
 	//レンタル期間
 	rTo := r.Form.Get(RENTAL_TO)
+	if !checkStrTime(rTo) && rTo != ""{
+		//レンタル終了日のチェック
+		proprietyResponse(false, "レンタル終了日が間違ってます", w)
+		return
+	}
 	rFrom := r.Form.Get(RENTAL_FROM)
+	if !checkStrTime(rFrom) {
+		//レンタル開始日のチェック
+		proprietyResponse(false, "レンタル開始日が間違ってます", w)
+		return
+	}
 	//現在時刻
 	nowTime := time.Now()
 	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
 	//レンタル開始日
-	rentalFrom := strTimeToTime(rFrom)
+	rentalFrom, _:= strTimeToTime(rFrom)
 	//レンタル終了日
 	var rentalTo time.Time
 	if rTo == "" {
@@ -142,35 +115,40 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 		rentalTo = rentalFrom
 		rTo = rFrom
 	} else {
-		rentalTo = strTimeToTime(rTo)
+		rentalTo, _ = strTimeToTime(rTo)
 	}
 	//利用できる日かどうか
 	if !checkRentalDay(rentalFrom, rentalTo, itemID, db) {
-		fmt.Fprintf(w, "%vから%vはレンタルできません\n", rentalFrom, rentalTo)
+		proprietyResponse(false, "利用できる日ではありません", w)
 		return
 	}
 	var dbSql string
 	//アイテムの情報を取得(料金などを設定するため)
 	iData, _ := getItemData(itemID, db)
-	fmt.Fprintf(w, "プロダクトデータ: %v \n", iData)
-
 	//料金を設定
 	var dayPrice int
 	var amount int
+	var usageFee int
 	//運営料金
 	managePrice := 0
+	//保険料金
+	insurancePrice := 0
 	if period := calcSubDate(rentalFrom, rentalTo); (period + 1) > 1 {
 		dayPrice = iData.Longday_price
-		amount = (period + 1) * dayPrice + managePrice
+		usageFee = (period + 1) * dayPrice
+		insurancePrice = calcInsurancePrice(dayPrice)
+		managePrice = calcManagementCharge(usageFee)
 	} else {
 		dayPrice = iData.Oneday_price
-		amount = dayPrice + managePrice
+		usageFee = dayPrice
+		insurancePrice = calcInsurancePrice(dayPrice)
+		managePrice = calcManagementCharge(usageFee)
 	}
-	fmt.Fprintf(w, "一日の料金は%v 合計料金は%v　です。\n", dayPrice, amount)
+	amount = usageFee + managePrice + insurancePrice
 	//新しいオーダーの作成
-	dbSql = "INSERT orders SET transport_allocate=?, rental_from=?, rental_to=?, item_id=?, user_id=?, day_price=?, management_charge=?, amount=?"
+	dbSql = "INSERT orders SET transport_allocate=?, rental_from=?, rental_to=?, item_id=?, user_id=?, day_price=?, insurance_price=?, management_charge=?, amount=?"
 	stmt, _ := db.Prepare(dbSql)
-	insRes, err := stmt.Exec(0, rFrom, rTo, itemID, userID, dayPrice, managePrice, amount)
+	insRes, err := stmt.Exec(0, rFrom, rTo, itemID, userID, dayPrice, insurancePrice, managePrice, amount)
 	if err != nil {
 		fmt.Fprintf(w, "オーダーのエラー: %v \n", err)
 		return
@@ -448,9 +426,20 @@ func cancelOtherBookings(tFrom, tTo time.Time, itemID string, db *sql.DB) error 
 	return nil
 }
 
+
 func (res *resPropriety) setResPropriety(success bool, errorMsg string)  {
 	res.IsSuccess = success
 	res.Error = errorMsg
+}
+
+//手数料の計算
+func calcManagementCharge(usagePrice int) int {
+	return usagePrice * MANAGEMENT_PRICE_RATE
+}
+
+//保険金の計算
+func calcInsurancePrice(dayPrice int) int {
+	return dayPrice * INSURANCE_PRICE_RATE
 }
 
 //sqlなどのサーバーのエラーが起こった時に返す値
@@ -473,6 +462,7 @@ func proprietyResponse(success bool, errMsg string, w http.ResponseWriter) {
 	fmt.Fprintf(w, string(res))
 }
 
+//jsonを返す時のheaderを書く
 func setResponseJsonHeader(state int, w http.ResponseWriter) http.ResponseWriter {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(state)
