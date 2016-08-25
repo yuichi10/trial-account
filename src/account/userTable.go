@@ -3,8 +3,17 @@ package account
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 )
 
+
+func checkUserID(userIDStr string) bool {
+	_, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		return false
+	}
+	return true
+}
 /**
  * ユーザーIDからカスタマーIDを出す
  * @param  {[type]} userID int           [description]

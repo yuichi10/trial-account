@@ -39,7 +39,7 @@ const (
 
 const (
 	//オーダーステータス
-	STATUS_CONTINUE_DELAY_FAILED        = -5
+	STATUS_CONTINUE_DELAY_FAILED        = -5 //遅延続行の実売上取得を失敗した時
 	STATUS_FAILED_REAL_SALE             = -4 //実売上の取得に失敗
 	STATUS_FAILED_CONSENT_PAY_BACK      = -3 //オーダーがキャンセルされた時に仮売上をキャンセル失敗した時
 	STATUS_FAILED_CONSENT               = -2 //オーダーが同意されなかった時
@@ -73,6 +73,7 @@ type orderType struct {
 	Item_id            int         `db:item_id`
 	User_id            int         `db:user_id`
 	Day_price          int         `db:day_price`
+	Insurance_price	   int 		   `db:insurance_price`
 	Management_charge  int 		   `db:management_charge`
 	Amount             int         `db:amount`
 	Cancel_date        interface{} `db:cancel_date`
@@ -99,6 +100,7 @@ func getOrderInfo(orderID string, db *sql.DB) (*orderType, error) {
 			&order.Item_id,
 			&order.User_id,
 			&order.Day_price,
+			&order.Insurance_price,
 			&order.Management_charge,
 			&order.Amount,
 			&order.Cancel_date,

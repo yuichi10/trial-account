@@ -3,7 +3,7 @@ package account
 import (
 	"database/sql"
 	"dbase"
-	_ "encoding/json"
+	"encoding/json"
 	"fmt"
 	"github.com/bitly/go-simplejson"
 	"net/http"
@@ -51,37 +51,31 @@ const (
 	FAILED_PROVISON_SALE=2
 )
 
+type resPropriety struct {
+	IsSuccess bool `json:"isSuccess"`
+	Error string `json:"error"`
+
+}
+
+var internalErrorJson string = "{\"error\":\"internal error\"}"
+
 func TestDB(w http.ResponseWriter, r *http.Request) {
-	/*r.ParseForm()
-	db := dbase.OpenDB()
-	fromStr := r.Form.Get(RENTAL_FROM)
-	from := strTimeToTime(fromStr)
-	preMarginDay := from.AddDate(0,0,-BOOK_MARGIN_DAYS)
-	toStr := r.Form.Get(RENTAL_TO)
-	to := strTimeToTime(toStr)
-	postMarginDay := to.AddDate(0,0, BOOK_MARGIN_DAYS)
-	//select * from orders where '2016-09-08'>rental_to order by rental_to desc limit 1
-	//SELECT rental_to, order_id FROM orders WHERE '2016-09-15'<rental_to order by rental_to desc limit 1
-	//select * from orders where '2016-09-13'<rental_from order by rental_from asc limit 5
-	//from := strTimeToTime(fromStr)
-	//一個前の日程を調べる
-	dbWhere := fmt.Sprintf("'%v'>%v", timeToStrYMD(preMarginDay), RENTAL_TO)
-	dbSql := fmt.Sprintf("SELECT %v, %v FROM %v WHERE %v ", RENTAL_TO, ORDER_ID, ORDER, dbWhere)
-	fmt.Fprintf(w, "sql: %v ", dbSql)
-	var near_rental_end time.Time
-	var orderID int
-	res, err := db.Query(dbSql)
-	if err != nil {
-		fmt.Fprintf(w, "query err: %v ", err)
-		return
+	if checkUserID("2") {
+		fmt.Fprintln(w, "数字")
+	} else {
+		fmt.Fprintln(w, "違う")
 	}
-	for res.Next() {
-		if err := res.Scan(&near_rental_end, &orderID); err != nil {
-			fmt.Fprintf(w, "scan err: %v ", err)
-			return
-		}
-		fmt.Fprintf(w, "一番近いレンタル\norderID: %v\n最後の日: %v", orderID, near_rental_end)
-	}*/
+	if checkUserID("s") {
+		fmt.Fprintln(w, "数字")
+	} else {
+		fmt.Fprintln(w, "違う")
+	}
+	if checkUserID("1000") {
+		fmt.Fprintln(w, "数字")
+	} else {
+		fmt.Fprintln(w, "違う")
+	}
+	//テスト
 }
 
 /**
@@ -128,6 +122,10 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
 	userID := r.Form.Get(USER_ID)
+	if !checkUserID(userID) {
+		//ユーザーのチェックを追加
+		return
+	}
 	itemID := r.Form.Get(ITEM_ID)
 	//レンタル期間
 	rTo := r.Form.Get(RENTAL_TO)
@@ -220,37 +218,41 @@ func ConsentOrder(w http.ResponseWriter, r *http.Request) {
 	orderID := r.Form.Get(ORDER_ID)
 	itemID := r.Form.Get(ITEM_ID)
 	order, _ := getOrderInfo(orderID, db)
-	if (itemID != strconv.Itoa(order.Item_id)) {
-		fmt.Fprintf(w, "商品が間違っています")
+	if itemID != strconv.Itoa(order.Item_id) {
+		proprietyResponse(false, "商品が間違っています", w)
 		return
 	}
 	//予約できる期間を過ぎていたら同意できない
 	if !checkRentalDayStart(order.Rental_from.(time.Time)) {
-		fmt.Fprintf(w, "もうすでに予約できません")
+		proprietyResponse(false, "もう予約できる期間を過ぎました", w)
 		return 
 	}
 	//すでに他のリクエストで同意されていたらできない
 	if !checkDoubleBooking(order.Rental_from.(time.Time), order.Rental_to.(time.Time), strconv.Itoa(order.Item_id), db) {
-		fmt.Fprintln(w, "すでに予約されています")
+		proprietyResponse(false, "すでに予約されています", w)
 		return
 	}
 	//オーダーのID
 	if checkOrderStatus(orderID, db, []int{STATUS_GET_CONSENT}...) {
-		fmt.Fprintf(w, "すでに同意されています \n")
+		proprietyResponse(false, "すでに同意されています", w)
 		return
 	}
 	if chState := checkOrderStatus(orderID, db, []int{STATUS_GET_PROVISION_SALE}...); !chState {
-		fmt.Fprintf(w, "ステータスの問題で同意できません status: チェック: %v \n", chState)
+		proprietyResponse(false, "ステータスの問題で同意できません", w)
 		return
 	}
 	//Orderのconsentをtrueに
 	if err := updateOrderState(orderID, STATUS_GET_CONSENT, db); err != nil {
-		fmt.Fprintf(w, "同意できませんでした\n")
+		responseInternalError(w)
 		return
 	}
 	//他にリクエストを送ってるものがあったらそれをキャンセルする
-	cancelOtherBookings(order.Rental_from.(time.Time), order.Rental_to.(time.Time), strconv.Itoa(order.Item_id), db)
-	fmt.Fprintf(w, "同意されました。\n")
+	err := cancelOtherBookings(order.Rental_from.(time.Time), order.Rental_to.(time.Time), strconv.Itoa(order.Item_id), db)
+	if err != nil {
+		responseInternalError(w)
+		return
+	}
+	proprietyResponse(true, "", w)
 }
 
 /**
@@ -406,7 +408,7 @@ func checkDoubleBooking(tFrom, tTo time.Time, itemID string, db *sql.DB) bool {
 	return false
 }
 
-func cancelOtherBookings(tFrom, tTo time.Time, itemID string, db *sql.DB) {
+func cancelOtherBookings(tFrom, tTo time.Time, itemID string, db *sql.DB) error {
 	r := new(http.Request)
 	marginFrom := tFrom.AddDate(0,0,-BOOK_MARGIN_DAYS)
 	marginTo := tTo.AddDate(0,0,BOOK_MARGIN_DAYS)
@@ -419,13 +421,11 @@ func cancelOtherBookings(tFrom, tTo time.Time, itemID string, db *sql.DB) {
 	res, err := db.Query(dbSql)
 	var orderID int
 	if err != nil {
-		fmt.Println("sql error cancelOtherBookings \n")
-		return
+		return err
 	}
 	for res.Next() {
 		if err := res.Scan(&orderID); err != nil {
-			fmt.Println("sql scan error cancelOtherBookings \n")
-			return
+			return err
 		}
 		freeCancel(strconv.Itoa(orderID), db, r)
 		updateOrderState(strconv.Itoa(orderID), STATUS_CANCEL, db)
@@ -436,15 +436,45 @@ func cancelOtherBookings(tFrom, tTo time.Time, itemID string, db *sql.DB) {
 	fmt.Printf("sql: %v \n", dbSql)
 	res, err = db.Query(dbSql)
 	if err != nil {
-		fmt.Println("sql error cancelOtherBookings \n")
-		return
+		return err
 	}
 	for res.Next() {
 		if err := res.Scan(&orderID); err != nil {
-			return
+			return err
 		}
 		freeCancel(strconv.Itoa(orderID), db, r)
 		updateOrderState(strconv.Itoa(orderID), STATUS_CANCEL, db)
 	}
+	return nil
 }
 
+func (res *resPropriety) setResPropriety(success bool, errorMsg string)  {
+	res.IsSuccess = success
+	res.Error = errorMsg
+}
+
+//sqlなどのサーバーのエラーが起こった時に返す値
+func responseInternalError(w http.ResponseWriter) {
+	w = setResponseJsonHeader(http.StatusInternalServerError, w)
+	fmt.Fprintf(w, internalErrorJson)
+}
+
+//条件に一致しなかった時にproprietyを返す
+func proprietyResponse(success bool, errMsg string, w http.ResponseWriter) {
+	response := new(resPropriety)
+	response.setResPropriety(success, errMsg)
+	res, err := json.Marshal(response)
+	if err != nil {
+		w = setResponseJsonHeader(http.StatusInternalServerError, w)
+		fmt.Fprintf(w, internalErrorJson)
+		return
+	}
+	w = setResponseJsonHeader(http.StatusOK, w)
+	fmt.Fprintf(w, string(res))
+}
+
+func setResponseJsonHeader(state int, w http.ResponseWriter) http.ResponseWriter {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(state)
+	return w
+}
