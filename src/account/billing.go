@@ -33,6 +33,13 @@ var internalErrorJson string = "{\"error\":\"internal error\"}"
 
 func TestDB(w http.ResponseWriter, r *http.Request) {
 	//テスト
+	db := dbase.OpenDB()
+	order, err := getOrderInfo("70", db)
+	if err != nil {
+		fmt.Printf("err: %v \n", err)
+		return
+	}
+	fmt.Println(order)
 }
 
 /**

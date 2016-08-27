@@ -10,20 +10,22 @@ import (
 const (
 	//オーダー
 	ORDER = "orders"
-	//オーダーID
 	ORDER_ID = "order_id"
-	//レンタルの開始日
-	RENTAL_FROM = "rental_from"
-	//レンタル終了日
-	RENTAL_TO          = "rental_to"
 	ORDER_CHARGE_ID    = "order_charge_id"
-	ORDER_CONSENT      = "order_consent"
-	ORDER_STATUS       = "status"
+	TRANSPORT_ALLOCATE = "transport_allocate"
+	RENTAL_FROM = "rental_from"
+	RENTAL_TO          = "rental_to"
+	ORDER_DAY_PRICE = "day_price"
+	ORDER_INSURANCE_PRICE = "insurance_price"
+	ORDER_MANAGEMENT_CHARGE = "management_charge"
+	ORDER_AMOUNT       = "amount"
 	ORDER_CANCEL_DATE  = "cancel_date"
 	ORDER_CANCEL_STATE = "cancel_status"
-	ORDER_AMOUNT       = "amount"
+	ORDER_STATUS       = "status"
+
+
+	//キャンセルするかどうかの要素を取得
 	IS_CANCEL          = "is_cancel"
-	ORDER_MANAGEMENT_CHARGE = "management_charge"
 )
 
 const (
@@ -66,7 +68,6 @@ const CANCEL_RATE float64 = 0.2
 type orderType struct {
 	Order_id           int         `db:order_id`
 	Order_charge_id    string      `db:order_charge_id`
-	Order_consent      int         `db:order_consent`
 	Transport_allocate int         `db:transport_allocate`
 	Rental_from        interface{} `db:rental_from`
 	Rental_to          interface{} `db:rental_to`
@@ -81,8 +82,12 @@ type orderType struct {
 	Status             int         `db:status`
 }
 
-func insertOrderInfo(){
-	
+func (order *orderType) insertOrderInfo(db *sql.DB){
+	/*dbSetSql := fmt.Sprintf("%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?",
+	 ORDER_CHARGE_ID, TRANSPORT_ALLOCATE, RENTAL_FROM, RENTAL_TO, ITEM_ID,
+	  USER_ID, ORDER_DAY_PRICE, INSURANCE_PRICE_RATE, MANAGEMENT_PRICE_RATE, ORDER_AMOUNT, 
+	  ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_STATUS)
+	*/
 }
 
 func getOrderInfo(orderID string, db *sql.DB) (*orderType, error) {
@@ -95,9 +100,9 @@ func getOrderInfo(orderID string, db *sql.DB) (*orderType, error) {
 		return order, err
 	}
 	for res.Next() {
-		if err := res.Scan(&order.Order_id,
+		if err := res.Scan(
+			&order.Order_id,
 			&order.Order_charge_id,
-			&order.Order_consent,
 			&order.Transport_allocate,
 			&order.Rental_from,
 			&order.Rental_to,
