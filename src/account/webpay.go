@@ -33,7 +33,7 @@ func webpayConnect(rawurl string, data url.Values, r *http.Request, connectType 
 		strings.NewReader(data.Encode()),
 	)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth(os.Getenv(WEBPAY_PRIVATE_KEY), "")
+	req.SetBasicAuth(os.Getenv("WEBPAY_PRIVATE_KEY"), "")
 	resp, err1 := client.Do(req)
 	if err1 != nil {
 		return "client.Do: ", err1

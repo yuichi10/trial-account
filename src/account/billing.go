@@ -67,7 +67,7 @@ func AddCustomer(w http.ResponseWriter, r *http.Request) {
 	cusName := js.Get(WP_CUS_CARD).Get(WP_CUS_CARD_NAME).MustString()
 	last4 := js.Get(WP_CUS_CARD).Get(WP_CUS_CURD_LAST4).MustString()
 	//ユーザーの追加
-	dbSql := fmt.Sprintf("INSERT users SET %s=?, %s=?", dbase.USER_CUSTMER_ID, dbase.USER_NAME)
+	dbSql := fmt.Sprintf("INSERT users SET %s=?, %s=?",  USER_CREDIT_ID, USER_NAME)
 	stmt, _ := db.Prepare(dbSql)
 	_, err = stmt.Exec(cusID, cusName)
 	if err == nil {

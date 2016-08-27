@@ -8,6 +8,8 @@ import (
 const (
 	USER = "users"
 	USER_ID = "user_id"
+	USER_CREDIT_ID = "credit_customer_id"
+	USER_NAME = "name"
 )
 
 /**
