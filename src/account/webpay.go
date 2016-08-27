@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"os"
 )
 
 const (
-	PRIVATE_KEY    = "test_secret_5QM6V828E0OveQocUQ8uO32R"
 	CONNECT_POST   = "POST"
 	CONNECT_GET    = "GET"
 	CONNECT_DELETE = "DELETE"
@@ -33,7 +33,7 @@ func webpayConnect(rawurl string, data url.Values, r *http.Request, connectType 
 		strings.NewReader(data.Encode()),
 	)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth(PRIVATE_KEY, "")
+	req.SetBasicAuth(os.Getenv(WEBPAY_PRIVATE_KEY), "")
 	resp, err1 := client.Do(req)
 	if err1 != nil {
 		return "client.Do: ", err1
