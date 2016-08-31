@@ -140,10 +140,17 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "オーダを作りました\n プロダクトIDは%v\n オーダーのIDは%v\n", itemID, order.Order_id)
 	if err != nil {
 		fmt.Printf("インサートオーダーエラー")
+		proprietyResponse(false, "登録に失敗", w)
 		return
 	}
 	//仮売上を取得
-	order.getProvisonalSale(db, r)
+	state, err := order.getProvisonalSale(db, r)
+	if err != nil && state == STATUS_FAILED_PROVISION_SALE {
+		fmt.Printf("仮売上エラー err: %v\n", err)
+		proprietyResponse(false, "仮売上の取得に失敗", w)
+		return
+	} 
+	proprietyResponse(true, "", w)
 }
 
 /**

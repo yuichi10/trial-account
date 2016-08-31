@@ -120,23 +120,29 @@ func (order *orderType) insertOrderInfo(db *sql.DB) (sql.Result, error){
 }
 
 //仮売上を取得
-func (order *orderType) getProvisonalSale(db *sql.DB, r *http.Request) {
+func (order *orderType) getProvisonalSale(db *sql.DB, r *http.Request) (int, error) {
 	//仮売上を取得
 	cID, _ := getCustomerID(order.User_id, db)
-	wpcRawJson, _ := webpayCreateProvisionalSale(cID, strconv.Itoa(order.Amount), r)
+	wpcRawJson, err := webpayCreateProvisionalSale(cID, strconv.Itoa(order.Amount), r)
+	if err != nil {
+		fmt.Printf("エラーメッセージ: %v \n", err)
+		return STATUS_FAILED_PROVISION_SALE, err
+	}
 	jsJson, _ := simplejson.NewJson([]byte(wpcRawJson))
 	if is, mes := checkCardError(jsJson); !is {
 		fmt.Printf("エラーメッセージ: %v \n", mes)
 		//ステータスを変更
 		if err := updateOrderState(strconv.Itoa(order.Order_id), STATUS_FAILED_PROVISION_SALE, db); err != nil {
 			fmt.Printf("update State error: %v \n ", err)
-			return
+			return STATUS_FAILED_PROVISION_SALE, err
 		}
+		return STATUS_FAILED_PROVISION_SALE, nil
 	} else {
 		if err := updateOrderState(strconv.Itoa(order.Order_id), STATUS_GET_PROVISION_SALE, db); err != nil {
 			fmt.Printf("update State error: %v \n ", err)
-			return
+			return STATUS_FAILED_PROVISION_SALE, err
 		}
+		return STATUS_GET_PROVISION_SALE, nil
 	}
 }
 
