@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+	"net/http"
+	"github.com/bitly/go-simplejson"
 )
 
 const (
@@ -86,20 +88,55 @@ type orderType struct {
 	Status             int         `db:status`
 }
 
-func (order *orderType) insertOrderInfo(db *sql.DB){
+//order情報を追加
+func (order *orderType) insertOrderInfo(db *sql.DB) (sql.Result, error){
 	dbSetSql := fmt.Sprintf("%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?",
 	ORDER_CHARGE_ID, TRANSPORT_ALLOCATE, RENTAL_FROM, RENTAL_TO, ITEM_ID,USER_ID, 
 	ORDER_DAY_PRICE, ORDER_AFTER_DAY_PRICE, ORDER_INSURANCE_PRICE, ORDER_MANAGEMENT_CHARGE, ORDER_AMOUNT, ORDER_CANCEL_PRICE, ORDER_CANCEL_DATE, 
 	ORDER_CANCEL_STATE, ORDER_STATUS)
 	dbSql := fmt.Sprintf("INSERT %v SET %v", ORDER, dbSetSql)
 	fmt.Println(dbSql)
-	_, err := db.Query(dbSql, order.Order_charge_id, order.Transport_allocate,
+	stmt, err := db.Prepare(dbSql)
+	if err != nil {
+		fmt.Printf("insertOrderInfo prepare ERROR: %v \n", err)
+		return nil, err
+	}
+	res, err := stmt.Exec(order.Order_charge_id, order.Transport_allocate,
 	order.Rental_from, order.Rental_to, order.Item_id, order.User_id, order.Day_price, order.After_day_price,
 	order.Insurance_price, order.Management_charge, order.Amount, order.Cancel_price, order.Cancel_date,
 	order.Cancel_status, order.Status)
 	if err != nil {
-		fmt.Printf("insertOrderInfo ERROR: %v \n", err)
-		return 
+		fmt.Printf("insertOrderInfo exec ERROR: %v \n", err)
+		return nil, err
+	}
+	orderLastID, err := res.LastInsertId()
+	if err != nil {
+		fmt.Printf("insertOrderInfo orderId ERROR: %v \n", err)
+		return nil, err
+	}
+	order.Order_id = int(orderLastID)
+	
+	return res, err
+}
+
+//仮売上を取得
+func (order *orderType) getProvisonalSale(db *sql.DB, r *http.Request) {
+	//仮売上を取得
+	cID, _ := getCustomerID(order.User_id, db)
+	wpcRawJson, _ := webpayCreateProvisionalSale(cID, strconv.Itoa(order.Amount), r)
+	jsJson, _ := simplejson.NewJson([]byte(wpcRawJson))
+	if is, mes := checkCardError(jsJson); !is {
+		fmt.Printf("エラーメッセージ: %v \n", mes)
+		//ステータスを変更
+		if err := updateOrderState(strconv.Itoa(order.Order_id), STATUS_FAILED_PROVISION_SALE, db); err != nil {
+			fmt.Printf("update State error: %v \n ", err)
+			return
+		}
+	} else {
+		if err := updateOrderState(strconv.Itoa(order.Order_id), STATUS_GET_PROVISION_SALE, db); err != nil {
+			fmt.Printf("update State error: %v \n ", err)
+			return
+		}
 	}
 }
 
@@ -244,4 +281,18 @@ func updateCancelOrderState(orderID string, state int, db *sql.DB) error {
 	stmt, err := db.Prepare(dbSql)
 	_, err = stmt.Exec(state, orderID)
 	return err
+}
+
+//オーダーの料金を設定
+func (order *orderType) setOrderPrice(db *sql.DB) {
+	iData, _ := getItemData(strconv.Itoa(order.Item_id), db)
+	//料金を設定
+	order.Day_price = iData.Oneday_price
+	order.After_day_price = iData.Longday_price
+	order.Insurance_price = calcInsurancePrice(order.Day_price)
+	period := calcSubDate(order.Rental_from.(time.Time), order.Rental_to.(time.Time));
+	usageFee := order.Day_price + period * order.After_day_price
+	order.Management_charge = calcManagementCharge(usageFee)
+	order.Cancel_price =(int)(float64(usageFee) * CANCEL_RATE)
+	order.Amount = usageFee + order.Insurance_price + order.Management_charge
 }

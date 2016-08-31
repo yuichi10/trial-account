@@ -35,7 +35,7 @@ func TestDB(w http.ResponseWriter, r *http.Request) {
 	//テスト
 	db := dbase.OpenDB()
 	defer db.Close()
-	_, fromTime, toTime := getInputAjustedTimes("2013-03-10", "2013-03-15")
+	fromTime, toTime := getInputAjustedTimes("2013-03-10", "2013-03-15")
 	order := new(orderType)
 	order.Transport_allocate = 0
 	order.Rental_from = fromTime
@@ -98,18 +98,21 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
 	userID := r.Form.Get(USER_ID)
+	order := new(orderType)
+	//ユーザーのIDのセット
 	if !isExitInDBUnique(USER, USER_ID, userID, db) {
-		//ユーザーのIDチェック
 		proprietyResponse(false, "ユーザーIDが間違ってます", w)
 		return
 	}
+	order.User_id, _ = strconv.Atoi(userID)
+	//アイテムIDのセット
 	itemID := r.Form.Get(ITEM_ID)
 	if !isExitInDBUnique(ITEM, ITEM_ID, itemID, db) {
-		//アイテムIDのチェック
 		proprietyResponse(false, "アイテムIDが間違ってます", w)
 		return
 	}
-	//レンタル期間
+	order.Item_id, _ = strconv.Atoi(itemID)
+	//レンタル期間のセット
 	rTo := r.Form.Get(RENTAL_TO)
 	if !checkStrTime(rTo) && rTo != ""{
 		//レンタル終了日のチェック
@@ -122,85 +125,25 @@ func PublishOrder(w http.ResponseWriter, r *http.Request) {
 		proprietyResponse(false, "レンタル開始日が間違ってます", w)
 		return
 	}
-	//現在時刻
-	nowTime := time.Now()
-	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
-	//レンタル開始日
-	rentalFrom, _:= strTimeToTime(rFrom)
-	//レンタル終了日
-	var rentalTo time.Time
-	if rTo == "" {
-		//最後の日が指定してなかった場合
-		rentalTo = rentalFrom
-		rTo = rFrom
-	} else {
-		rentalTo, _ = strTimeToTime(rTo)
-	}
+	rentalFrom, rentalTo := getInputAjustedTimes(rFrom, rTo)
 	//利用できる日かどうか
 	if !checkRentalDay(rentalFrom, rentalTo, itemID, db) {
 		proprietyResponse(false, "利用できる日ではありません", w)
 		return
 	}
-	var dbSql string
+	order.Rental_from = rentalFrom
+	order.Rental_to = rentalTo
 	//アイテムの情報を取得(料金などを設定するため)
-	iData, _ := getItemData(itemID, db)
-	//料金を設定
-	var dayPrice int
-	var amount int
-	var usageFee int
-	//運営料金
-	managePrice := 0
-	//保険料金
-	insurancePrice := 0
-	if period := calcSubDate(rentalFrom, rentalTo); (period + 1) > 1 {
-		dayPrice = iData.Longday_price
-		usageFee = (period + 1) * dayPrice
-		insurancePrice = calcInsurancePrice(dayPrice)
-		managePrice = calcManagementCharge(usageFee)
-	} else {
-		dayPrice = iData.Oneday_price
-		usageFee = dayPrice
-		insurancePrice = calcInsurancePrice(dayPrice)
-		managePrice = calcManagementCharge(usageFee)
-	}
-	amount = usageFee + managePrice + insurancePrice
-	//新しいオーダーの作成
-	dbSql = "INSERT orders SET transport_allocate=?, rental_from=?, rental_to=?, item_id=?, user_id=?, day_price=?, insurance_price=?, management_charge=?, amount=?"
-	stmt, _ := db.Prepare(dbSql)
-	insRes, err := stmt.Exec(0, rFrom, rTo, itemID, userID, dayPrice, insurancePrice, managePrice, amount)
+	order.setOrderPrice(db)
+	_, err := order.insertOrderInfo(db)
+	//orderLastID, _ := res.LastInsertId()
+	fmt.Fprintf(w, "オーダを作りました\n プロダクトIDは%v\n オーダーのIDは%v\n", itemID, order.Order_id)
 	if err != nil {
-		fmt.Fprintf(w, "オーダーのエラー: %v \n", err)
+		fmt.Printf("インサートオーダーエラー")
 		return
 	}
-	orderLastID, _ := insRes.LastInsertId()
-	fmt.Fprintf(w, "オーダを作りました\n プロダクトIDは%v\n オーダーのIDは%v\n", itemID, orderLastID)
 	//仮売上を取得
-	userID_int, _ := strconv.Atoi(userID)
-	cID, _ := getCustomerID(userID_int, db)
-	if err != nil {
-		fmt.Fprintf(w, "customer id err: %v \n", err)
-		return
-	}
-	fmt.Fprintf(w, "customer ID: %v\n", cID)
-	wpcRawJson, _ := webpayCreateProvisionalSale(cID, strconv.Itoa(amount), r)
-	jsJson, _ := simplejson.NewJson([]byte(wpcRawJson))
-	if is, mes := checkCardError(jsJson); !is {
-		fmt.Fprintf(w, "エラーメッセージ: %v \n", mes)
-		//ステータスを変更
-		if err := updateOrderState(strconv.Itoa(int(orderLastID)), STATUS_FAILED_PROVISION_SALE, db); err != nil {
-			fmt.Fprintf(w, "update State error: %v \n ", err)
-			return
-		}
-	} else {
-		//ウェブペイのIDを登録とすてーたすの変更
-		dbSql = "UPDATE orders SET order_charge_id=?, status=? where order_id=?"
-		stmt, _ = db.Prepare(dbSql)
-		_, err = stmt.Exec(jsJson.Get(WP_ID).MustString(), STATUS_GET_PROVISION_SALE, orderLastID)
-		if err != nil {
-			fmt.Fprintf(w, "アップデート: %v \n", err)
-			return
-		}
-	}
+	order.getProvisonalSale(db, r)
 }
 
 /**
@@ -294,10 +237,10 @@ func DisagreeOrder(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "rawjson: %v \n err: %v \n", rawjson, err)
 }
 
-func getInputAjustedTimes(from, to string) (nowTime, rentalFrom, rentalTo time.Time) {
+func getInputAjustedTimes(from, to string) (rentalFrom, rentalTo time.Time) {
 	//現在時刻
-	nowTime = time.Now()
-	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
+	//nowTime = time.Now()
+	//nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
 	//レンタル開始日
 	rentalFrom, _ = strTimeToTime(from)
 	if to == "" {
