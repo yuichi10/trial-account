@@ -16,9 +16,11 @@ const (
 	RENTAL_FROM = "rental_from"
 	RENTAL_TO          = "rental_to"
 	ORDER_DAY_PRICE = "day_price"
+	ORDER_AFTER_DAY_PRICE = "after_day_price"
 	ORDER_INSURANCE_PRICE = "insurance_price"
 	ORDER_MANAGEMENT_CHARGE = "management_charge"
 	ORDER_AMOUNT       = "amount"
+	ORDER_CANCEL_PRICE = "cancel_price"
 	ORDER_CANCEL_DATE  = "cancel_date"
 	ORDER_CANCEL_STATE = "cancel_status"
 	ORDER_STATUS       = "status"
@@ -74,20 +76,31 @@ type orderType struct {
 	Item_id            int         `db:item_id`
 	User_id            int         `db:user_id`
 	Day_price          int         `db:day_price`
+	After_day_price	   int 		   `db:after_day_price`
 	Insurance_price	   int 		   `db:insurance_price`
 	Management_charge  int 		   `db:management_charge`
 	Amount             int         `db:amount`
+	Cancel_price       int         `db:cancel_price`
 	Cancel_date        interface{} `db:cancel_date`
 	Cancel_status      int         `db:cancel_status`
 	Status             int         `db:status`
 }
 
 func (order *orderType) insertOrderInfo(db *sql.DB){
-	/*dbSetSql := fmt.Sprintf("%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?",
-	 ORDER_CHARGE_ID, TRANSPORT_ALLOCATE, RENTAL_FROM, RENTAL_TO, ITEM_ID,
-	  USER_ID, ORDER_DAY_PRICE, INSURANCE_PRICE_RATE, MANAGEMENT_PRICE_RATE, ORDER_AMOUNT, 
-	  ORDER_CANCEL_DATE, ORDER_CANCEL_STATE, ORDER_STATUS)
-	*/
+	dbSetSql := fmt.Sprintf("%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?,%v=?",
+	ORDER_CHARGE_ID, TRANSPORT_ALLOCATE, RENTAL_FROM, RENTAL_TO, ITEM_ID,USER_ID, 
+	ORDER_DAY_PRICE, ORDER_AFTER_DAY_PRICE, ORDER_INSURANCE_PRICE, ORDER_MANAGEMENT_CHARGE, ORDER_AMOUNT, ORDER_CANCEL_PRICE, ORDER_CANCEL_DATE, 
+	ORDER_CANCEL_STATE, ORDER_STATUS)
+	dbSql := fmt.Sprintf("INSERT %v SET %v", ORDER, dbSetSql)
+	fmt.Println(dbSql)
+	_, err := db.Query(dbSql, order.Order_charge_id, order.Transport_allocate,
+	order.Rental_from, order.Rental_to, order.Item_id, order.User_id, order.Day_price, order.After_day_price,
+	order.Insurance_price, order.Management_charge, order.Amount, order.Cancel_price, order.Cancel_date,
+	order.Cancel_status, order.Status)
+	if err != nil {
+		fmt.Printf("insertOrderInfo ERROR: %v \n", err)
+		return 
+	}
 }
 
 func getOrderInfo(orderID string, db *sql.DB) (*orderType, error) {

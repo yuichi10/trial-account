@@ -34,12 +34,24 @@ var internalErrorJson string = "{\"error\":\"internal error\"}"
 func TestDB(w http.ResponseWriter, r *http.Request) {
 	//テスト
 	db := dbase.OpenDB()
-	order, err := getOrderInfo("70", db)
-	if err != nil {
-		fmt.Printf("err: %v \n", err)
-		return
-	}
-	fmt.Println(order)
+	defer db.Close()
+	_, fromTime, toTime := getInputAjustedTimes("2013-03-10", "2013-03-15")
+	order := new(orderType)
+	order.Transport_allocate = 0
+	order.Rental_from = fromTime
+	order.Rental_to = toTime
+	order.Item_id = 4
+	order.User_id = 4
+	order.Day_price = 5000
+	order.After_day_price = 4000
+	order.Insurance_price = 0
+	order.Management_charge = 0
+	order.Amount = 16000
+	order.Cancel_price = 8000
+	order.Cancel_date = nil
+	order.Cancel_status = 0
+	order.Status = 0
+	order.insertOrderInfo(db)
 }
 
 /**
@@ -280,6 +292,22 @@ func DisagreeOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Fprintf(w, "rawjson: %v \n err: %v \n", rawjson, err)
+}
+
+func getInputAjustedTimes(from, to string) (nowTime, rentalFrom, rentalTo time.Time) {
+	//現在時刻
+	nowTime = time.Now()
+	nowTime = time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), nowTime.Hour(), nowTime.Minute(), 0, 0, time.UTC)
+	//レンタル開始日
+	rentalFrom, _ = strTimeToTime(from)
+	if to == "" {
+		//最後の日が指定してなかった場合
+		rentalTo = rentalFrom
+		to = from
+	} else {
+		rentalTo, _ = strTimeToTime(to)
+	}
+	return
 }
 
 /**
