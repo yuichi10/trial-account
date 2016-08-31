@@ -1,5 +1,6 @@
 package account
 
+/*
 import (
 	_ "database/sql"
 	"dbase"
@@ -9,13 +10,14 @@ import (
 	"net/http"
 	"strconv"
 	_ "time"
-)
+)*/
 
 /**
  * 保険料のデポジットの作成
  * @param {[type]} w http.ResponseWriter [description]
  * @param {[type]} r *http.Request       [description]
  */
+ /*
 func StartNegotiateDeposit(w http.ResponseWriter, r *http.Request) {
 	//理由から遅延料金、保険料金を設定
 	//保険料のデポジットをとれる期間かどうかの判定,もうすでにないかどうかの判定
@@ -55,13 +57,14 @@ func StartNegotiateDeposit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Fprintf(w, "新しいデポジットを作成しました")
-}
+}*/
 
 /**
  * デポジット料金をアップデート
  * @param {[type]} w http.ResponseWriter [description]
  * @param {[type]} r *http.Request       [description]
  */
+ /*
 func UpdateDeposit(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
@@ -90,13 +93,14 @@ func UpdateDeposit(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "デポジット: %v \n エラー: %v \n", deposit, err)
 	return
 }
-
+*/
 /**
  * デポジット料金の同意(両方)
  * @param  {[type]} w http.ResponseWriter [description]
  * @param  {[type]} r *http.Request       [description]
  * @return {[type]}   [description]
  */
+ /*
 func ConsentDeposit(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	db := dbase.OpenDB()
@@ -194,3 +198,4 @@ func ConsentDeposit(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "オーダー: %v \n エラー: %v \n", order, err)
 }
+*/

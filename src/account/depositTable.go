@@ -1,5 +1,5 @@
 package account
-
+/*
 import (
 	"database/sql"
 	_ "encoding/json"
@@ -98,3 +98,4 @@ func checkDepositLimit(orderID string, db *sql.DB) bool {
 	}
 	return true
 }
+*/
